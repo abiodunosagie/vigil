@@ -9,16 +9,16 @@ func check(_ condition: Bool, _ name: String, line: Int = #line) {
     }
 }
 
-let epoch = Date(timeIntervalSince1970: 1_800_000_000)
+let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
 func s(_ id: String, _ activity: Activity, _ project: String? = "app", at updated: TimeInterval = 0) -> Session {
-    Session(id: id, project: project, activity: activity, updatedAt: epoch.addingTimeInterval(updated))
+    Session(id: id, project: project, activity: activity, updatedAt: t0.addingTimeInterval(updated))
 }
 
 /// One scan at `t` seconds, with wall clock and uptime moving together.
 func step(_ a: inout Announcer, _ sessions: [Session], _ t: TimeInterval,
           unreadable: Set<String> = [], abandoned: Set<String> = []) -> [Announcement] {
-    a.update(sessions, unreadable: unreadable, abandoned: abandoned, uptime: t, now: epoch.addingTimeInterval(t))
+    a.update(sessions, unreadable: unreadable, abandoned: abandoned, uptime: t, now: t0.addingTimeInterval(t))
 }
 
 @main
@@ -27,10 +27,12 @@ enum AnnouncerTests {
         let settle = Announcer.settle
 
         do {
+            // The first scan learns what is open; it never announces.
             var a = Announcer()
             check(step(&a, [s("1", .waiting), s("2", .idle)], 0).isEmpty, "first scan is silent")
         }
         do {
+            // Work then idle: finished only after the settle time, and only once.
             var a = Announcer()
             _ = step(&a, [s("1", .idle)], 0)
             check(step(&a, [s("1", .working)], 3).isEmpty, "working is silent")
@@ -51,6 +53,7 @@ enum AnnouncerTests {
             check(step(&a, [s("1", .idle)], 41 + settle) == [.finished(project: "app")], "finished after real stop")
         }
         do {
+            // Each question is announced once; answering and then stopping is a finish.
             var a = Announcer()
             _ = step(&a, [s("1", .working)], 0)
             check(step(&a, [s("1", .waiting)], 3) == [.waiting(project: "app")], "waiting announced")
@@ -74,6 +77,7 @@ enum AnnouncerTests {
             check(step(&a, [], 3, abandoned: ["1"]).isEmpty, "abandoned is silent")
         }
         do {
+            // Closed while a question was open: not a finish.
             var a = Announcer()
             _ = step(&a, [s("1", .working)], 0)
             _ = step(&a, [s("1", .waiting)], 3)
@@ -88,19 +92,44 @@ enum AnnouncerTests {
             check(step(&a, [], 60).isEmpty, "stale then closed is silent")
         }
         do {
+            // A very long tool call goes stale, then a real Stop: that is a finish.
+            var a = Announcer()
+            _ = step(&a, [s("1", .working)], 0)
+            _ = step(&a, [s("1", .stale)], 3)
+            _ = step(&a, [s("1", .idle)], 6)
+            check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(project: "app")], "stale then idle finishes")
+        }
+        do {
+            // Stale then back to work: owes a finish again.
+            var a = Announcer()
+            _ = step(&a, [s("1", .stale)], 0)
+            _ = step(&a, [s("1", .working)], 3)
+            check(step(&a, [], 6) == [.finished(project: "app")], "stale, working, ended")
+        }
+        do {
+            // Abandoned after a finish was already announced, or while waiting: silent.
+            var a = Announcer()
+            _ = step(&a, [s("1", .working), s("2", .working)], 0)
+            _ = step(&a, [s("1", .idle), s("2", .waiting)], 3)
+            _ = step(&a, [s("1", .idle), s("2", .waiting)], 3 + settle)
+            check(step(&a, [], 30, abandoned: ["1", "2"]).isEmpty, "abandoned after finish or while waiting")
+        }
+        do {
             // An unreadable marker for one scan changes nothing.
             var a = Announcer()
             _ = step(&a, [s("1", .working)], 0)
             check(step(&a, [], 3, unreadable: ["1"]).isEmpty, "unreadable is kept")
             check(step(&a, [s("1", .working)], 6).isEmpty, "back after unreadable")
-            check(a.since("1") == epoch, "since survives an unreadable scan")
+            check(a.since("1") == t0, "since survives an unreadable scan")
         }
         do {
+            // A session that appears already waiting is announced.
             var a = Announcer()
             _ = step(&a, [], 0)
             check(step(&a, [s("1", .waiting, nil)], 3) == [.waiting(project: nil)], "new waiting session")
         }
         do {
+            // Sessions are tracked independently.
             var a = Announcer()
             _ = step(&a, [s("1", .working, "a"), s("2", .working, "b")], 0)
             _ = step(&a, [s("1", .idle, "a"), s("2", .working, "b")], 3)
@@ -111,12 +140,12 @@ enum AnnouncerTests {
             // Since: first sight takes the marker time; a change takes the scan time; no change keeps it.
             var a = Announcer()
             _ = step(&a, [s("1", .working, at: -3600)], 0)
-            check(a.since("1") == epoch.addingTimeInterval(-3600), "first sight uses the marker time")
-            _ = step(&a, [s("1", .working, at: 5)], 10)
-            check(a.since("1") == epoch.addingTimeInterval(-3600), "unchanged keeps since")
+            check(a.since("1") == t0.addingTimeInterval(-3600), "first sight uses the marker time")
+            _ = step(&a, [s("1", .working, at: 5)], 10)  // a fresh marker write, same activity
+            check(a.since("1") == t0.addingTimeInterval(-3600), "unchanged keeps since")
             _ = step(&a, [s("1", .idle, at: 12)], 15)
-            check(a.since("1") == epoch.addingTimeInterval(15), "a change stamps the scan time")
-            _ = step(&a, [s("1", .idle, nil)], 18)
+            check(a.since("1") == t0.addingTimeInterval(15), "a change stamps the scan time")
+            _ = step(&a, [s("1", .idle, nil as String?)], 18)
             check(a.project("1") == "app", "project remembered when the marker has none")
         }
         print(failures == 0 ? "Announcer tests passed" : "\(failures) failed")

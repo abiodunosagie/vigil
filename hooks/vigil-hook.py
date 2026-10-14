@@ -8,11 +8,11 @@ One script for every event. It writes one small marker file per Claude Code sess
   Notification: idle prompt, Stop                  -> state "idle"
   SessionEnd                                       -> marker removed
 
-The marker holds only the state, the pid of the owning `claude` process, a timestamp, and
-the name of the session's project folder (the last part of its working directory). Nothing
-else from the hook payload (prompt text, tool input or output, messages) is ever stored. Vigil treats a
-marker as working only while that pid is a live `claude` process and the marker is recent,
-so a crashed, killed or interrupted session cannot keep the Mac awake.
+The marker holds only the state, the pid of the owning `claude` process, a timestamp,
+and the name of the session's project folder (the last part of its working directory).
+Nothing else from the hook payload (prompt text, tool input or output, messages) is ever
+stored. Vigil treats a marker as working only while that pid is a live `claude` process and
+the marker is recent, so a crashed, killed or interrupted session cannot keep the Mac awake.
 
 The hook never blocks Claude: it prints nothing and always exits 0.
 """
@@ -49,9 +49,9 @@ _WALK_DEADLINE_SECONDS = 1.5
 # The shortest timeout handed to a single `ps` near the deadline.
 _MIN_PS_TIMEOUT = 0.05
 _MAX_PROJECT_NAME = 80
-# PostToolUse carries the tool output, so payloads can be large; a cut payload would not
-# parse. This only stops a runaway one from eating memory.
-_MAX_STDIN = 64 << 20
+# PostToolUse carries the tool output, so payloads can be large. This only stops a runaway
+# one from eating memory: a payload past the cap fails to parse and the event is skipped.
+_MAX_STDIN = 64 * 1024 * 1024
 
 
 def marker_path(session_id: str) -> Path | None:
@@ -147,8 +147,9 @@ def project_name(payload: dict) -> str | None:
 
 
 def write_marker(path: Path, state: str, claude_pid: int, project: str | None) -> None:
-    # Only this user may read which projects are open.
+    # Only this user may read which projects are open; tighten a folder made before that rule.
     SESSIONS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(SESSIONS_DIR, 0o700)
     record: dict = {"state": state, "claude_pid": claude_pid, "updated_at": time.time()}
     if project:
         record["project"] = project

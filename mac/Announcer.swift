@@ -9,7 +9,8 @@ enum Activity: Equatable {
     /// Finished, or sitting at the prompt.
     case idle
     /// Said working or waiting, but has not been heard from for too long (an interrupted
-    /// turn, a question left unanswered). Not held awake, and never reported as finished.
+    /// turn, a question left unanswered, a very long tool call). Not held awake. Reported as
+    /// finished only if a real Stop later turns it idle.
     case stale
 
     /// Holds the Mac awake.
@@ -47,14 +48,15 @@ enum Announcement: Equatable {
 /// work, not on the first idle: a Stop hook can send Claude straight back to work, and that
 /// must not produce a false "finished". A session whose marker was removed by Claude Code
 /// (a one-shot `claude -p` run ends in milliseconds) after working counts as finished too;
-/// one whose process died (a closed terminal, a kill) or that went stale does not.
+/// one whose process died (a closed terminal, a kill), or that ends while waiting or stale,
+/// does not.
 struct Announcer {
     struct Track {
         var activity: Activity
         /// Uptime of the last change of activity, for the settle time.
-        var changedUptime: TimeInterval
+        var changedAtUptime: TimeInterval
         /// Wall clock time of the last change of activity, for the panel.
-        var since: Date
+        var changedAt: Date
         var project: String?
         /// Did work since the last "finished".
         var owesFinished: Bool
@@ -67,7 +69,7 @@ struct Announcer {
     private var seeded = false
 
     /// Since when the session has been in its current activity.
-    func since(_ id: String) -> Date? { tracks[id]?.since }
+    func since(_ id: String) -> Date? { tracks[id]?.changedAt }
 
     /// The last project name heard for the session.
     func project(_ id: String) -> String? { tracks[id]?.project }
@@ -75,6 +77,8 @@ struct Announcer {
     /// - Parameters:
     ///   - unreadable: sessions whose marker could not be read this time; kept as they were.
     ///   - abandoned: sessions whose `claude` process died; dropped without a "finished".
+    ///   - uptime: system uptime, for the settle time.
+    ///   - now: wall clock time, for since times.
     mutating func update(_ sessions: [Session], unreadable: Set<String> = [], abandoned: Set<String> = [],
                          uptime: TimeInterval, now: Date) -> [Announcement] {
         var out: [Announcement] = []
@@ -83,8 +87,8 @@ struct Announcer {
             seen.insert(session.id)
             guard var track = tracks[session.id] else {
                 // First sight: the marker's own time is the best guess of when this began.
-                tracks[session.id] = Track(activity: session.activity, changedUptime: uptime,
-                                           since: min(session.updatedAt, now), project: session.project,
+                tracks[session.id] = Track(activity: session.activity, changedAtUptime: uptime,
+                                           changedAt: min(session.updatedAt, now), project: session.project,
                                            owesFinished: session.activity.isActive)
                 if seeded, session.activity == .waiting { out.append(.waiting(project: session.project)) }
                 continue
@@ -92,25 +96,25 @@ struct Announcer {
             if let project = session.project { track.project = project }
             if track.activity != session.activity {
                 track.activity = session.activity
-                track.changedUptime = uptime
-                track.since = now
+                track.changedAtUptime = uptime
+                track.changedAt = now
                 switch session.activity {
                 case .working: track.owesFinished = true
                 case .waiting:
                     track.owesFinished = true
                     out.append(.waiting(project: track.project))
-                case .stale: track.owesFinished = false
-                case .idle: break
+                case .idle, .stale: break
                 }
             }
-            if track.activity == .idle, track.owesFinished, uptime - track.changedUptime >= Self.settle {
+            if track.activity == .idle, track.owesFinished, uptime - track.changedAtUptime >= Self.settle {
                 track.owesFinished = false
                 out.append(.finished(project: track.project))
             }
             tracks[session.id] = track
         }
         for (id, track) in tracks where !seen.contains(id) {
-            let ended = !abandoned.contains(id) && track.owesFinished && track.activity != .waiting
+            let ended = !abandoned.contains(id) && track.owesFinished
+                && track.activity != .waiting && track.activity != .stale
             if ended { out.append(.finished(project: track.project)) }
             tracks[id] = nil
         }

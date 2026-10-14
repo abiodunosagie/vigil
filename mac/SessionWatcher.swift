@@ -76,7 +76,12 @@ final class SessionWatcher: ObservableObject {
 
     func refresh() {
         // A folder that cannot be listed says nothing about the sessions; try again next tick.
-        guard let scan = Self.scan() else { return }
+        // A missing one (deleted by hand) is recreated and then reads as empty.
+        guard let scan = Self.scan() else {
+            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true,
+                                                     attributes: [.posixPermissions: 0o700])
+            return
+        }
         let uptime = ProcessInfo.processInfo.systemUptime
         let now = Date()
         for announcement in announcer.update(scan.sessions, unreadable: scan.unreadable, abandoned: scan.abandoned,
@@ -162,8 +167,9 @@ final class SessionWatcher: ObservableObject {
     }
 
     /// The live sessions, or nil when the folder cannot be listed. Markers whose `claude`
-    /// process is gone are deleted, and so are temp files a hook left behind when it was
-    /// killed mid-write.
+    /// process is gone are deleted and reported as abandoned. Temp files a hook left behind
+    /// when it was killed mid-write, and markers unreadable for longer than the stale limit,
+    /// are deleted too.
     private static func scan() -> Scan? {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
@@ -181,17 +187,23 @@ final class SessionWatcher: ObservableObject {
             }
             guard file.pathExtension == "json" else { continue }
             let id = file.deletingPathExtension().lastPathComponent
-            guard let marker = Marker.read(file) else {
-                result.unreadable.insert(id)
+            let age = values?.contentModificationDate.map { Date().timeIntervalSince($0) } ?? 0
+            guard var marker = Marker.read(file) else {
+                if age > Marker.staleAfter { try? fm.removeItem(at: file) } else { result.unreadable.insert(id) }
                 continue
             }
-            guard marker.ownerAlive else {
+            if !marker.ownerAlive {
                 // Re-read first: a resumed session may have just rewritten this file.
-                if Marker.read(file)?.ownerAlive == false {
+                guard let again = Marker.read(file) else {
+                    result.unreadable.insert(id)
+                    continue
+                }
+                guard again.ownerAlive else {
                     try? fm.removeItem(at: file)
                     result.abandoned.insert(id)
+                    continue
                 }
-                continue
+                marker = again
             }
             result.sessions.append(Session(id: id, project: marker.project, activity: marker.activity(),
                                            updatedAt: Date(timeIntervalSince1970: marker.updatedAt)))

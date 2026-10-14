@@ -53,7 +53,7 @@ def test_prompt_marks_busy_with_owner_pid(sessions, owner):
     marker = _marker(sessions)
     assert marker["state"] == "busy"
     assert marker["claude_pid"] == 4242
-    assert set(marker) == {"state", "claude_pid", "updated_at"}
+    assert set(marker) == {"state", "claude_pid", "updated_at"}  # no cwd, so no project
     assert "secret" not in (sessions / "abc-123.json").read_text()
 
 
@@ -113,7 +113,9 @@ def test_project_is_the_folder_name_only(sessions, owner):
     marker = _marker(sessions)
     assert set(marker) == {"state", "claude_pid", "updated_at", "project"}
     assert marker["project"] == "vigil"
-    assert "/Users/me/Projects" not in (sessions / "abc-123.json").read_text()
+    text = (sessions / "abc-123.json").read_text()
+    assert "Users" not in text and "Projects" not in text
+    assert "secret" not in text
 
 
 @pytest.mark.parametrize("cwd, expected", [
@@ -127,7 +129,10 @@ def test_project_name_without_cwd():
     assert hook.project_name({}) is None
 
 
-def test_sessions_folder_is_private(sessions, owner):
+def test_sessions_folder_is_private_when_new_and_when_old(sessions, owner):
+    hook.handle({"hook_event_name": "Stop", "session_id": "abc-123"}, 1)
+    assert sessions.stat().st_mode & 0o777 == 0o700
+    sessions.chmod(0o755)
     hook.handle({"hook_event_name": "Stop", "session_id": "abc-123"}, 1)
     assert sessions.stat().st_mode & 0o777 == 0o700
 
