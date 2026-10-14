@@ -17,6 +17,10 @@ enum TerminalJump {
     /// is checked before it goes into the script.
     @discardableResult
     static func show(pid: pid_t) -> Bool {
+        // A session in iTerm or an editor has a tty too; never launch Terminal to look for it.
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").isEmpty else {
+            return false
+        }
         guard let tty = tty(of: pid), tty.range(of: #"^/dev/ttys[0-9]+$"#, options: .regularExpression) != nil else {
             return false
         }

@@ -16,11 +16,14 @@ enum LidHelper {
         FileManager.default.fileExists(atPath: script) && FileManager.default.fileExists(atPath: plist)
     }
 
+    /// Logged once per run, not on every 3 second tick.
+    nonisolated(unsafe) private static var reportedBeatFailure = false
+
     /// Keeps the heartbeat fresh while `on`; removes it otherwise so the helper lets go.
     static func beat(_ on: Bool) {
         if on {
-            let path = heartbeat.path
-            if !FileManager.default.createFile(atPath: path, contents: nil) {
+            if !FileManager.default.createFile(atPath: heartbeat.path, contents: nil), !reportedBeatFailure {
+                reportedBeatFailure = true
                 NSLog("Vigil lid heartbeat not written")
             }
         } else if FileManager.default.fileExists(atPath: heartbeat.path) {
@@ -28,28 +31,45 @@ enum LidHelper {
         }
     }
 
-    enum Failure: Error { case missingScript, cancelled, failed }
+    enum Failure: Error { case cancelled, failed }
+
+    /// Seconds between helper runs; with the helper's 45 second heartbeat limit, lid sleep is
+    /// back at most about a minute after Vigil stops.
+    static let interval = 15
+
+    /// The launchd job, as XML.
+    static func daemonPlist() throws -> Data {
+        try PropertyListSerialization.data(fromPropertyList: [
+            "Label": label,
+            "ProgramArguments": [script, heartbeat.path],
+            "StartInterval": interval,
+            "RunAtLoad": true,
+        ] as [String: Any], format: .xml, options: 0)
+    }
+
+    /// The admin command that installs the helper. Root writes both files from text carried
+    /// inside this command (base64, built into Vigil), never from a file a user process could
+    /// swap while the password prompt is open.
+    static func installCommand(script scriptText: Data, plist plistData: Data) -> String {
+        let s = scriptText.base64EncodedString(), p = plistData.base64EncodedString()
+        return [
+            "/bin/mkdir -p /Library/PrivilegedHelperTools",
+            "/bin/echo '\(s)' | /usr/bin/base64 -D > \(quote(script))",
+            "/usr/sbin/chown root:wheel \(quote(script))",
+            "/bin/chmod 755 \(quote(script))",
+            "/bin/echo '\(p)' | /usr/bin/base64 -D > \(quote(plist))",
+            "/usr/sbin/chown root:wheel \(quote(plist))",
+            "/bin/chmod 644 \(quote(plist))",
+            "/usr/bin/plutil -lint -s \(quote(plist))",
+            // Replace a running copy: bootout returns before launchd lets go of the label.
+            "{ /bin/launchctl bootout system/\(label) 2>/dev/null; /bin/sleep 1; /bin/launchctl bootstrap system \(quote(plist)); }",
+        ].joined(separator: " && ")
+    }
 
     /// Installs the helper, asking for the admin password.
     static func install() throws {
-        guard let source = Bundle.main.path(forResource: "vigil-lid", ofType: "sh") else { throw Failure.missingScript }
-        let daemon: [String: Any] = [
-            "Label": label,
-            "ProgramArguments": [script, heartbeat.path],
-            "StartInterval": 15,
-            "RunAtLoad": true,
-        ]
-        let data = try PropertyListSerialization.data(fromPropertyList: daemon, format: .xml, options: 0)
-        let staged = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
-        try data.write(to: staged, options: .atomic)
-        let commands = [
-            "/bin/mkdir -p /Library/PrivilegedHelperTools",
-            "/usr/bin/install -o root -g wheel -m 755 \(quote(source)) \(quote(script))",
-            "/usr/bin/install -o root -g wheel -m 644 \(quote(staged.path)) \(quote(plist))",
-            "/bin/launchctl bootout system/\(label) 2>/dev/null; /bin/launchctl bootstrap system \(quote(plist))",
-        ]
-        try runAsAdmin(commands.joined(separator: " && "))
-        try? FileManager.default.removeItem(at: staged)
+        guard let scriptText = Data(base64Encoded: LidScript.base64) else { throw Failure.failed }
+        try runAsAdmin(installCommand(script: scriptText, plist: try daemonPlist()))
     }
 
     /// Removes the helper and puts lid sleep back, asking for the admin password.

@@ -5,7 +5,7 @@ import Foundation
 struct WidgetSnapshot: Codable, Equatable {
     struct Item: Codable, Equatable {
         let project: String
-        let activity: String
+        let activity: Activity
     }
 
     var holding: Bool
@@ -15,10 +15,28 @@ struct WidgetSnapshot: Codable, Equatable {
     var sessions: [Item]
     var todayTasks: Int
     var todayWorking: TimeInterval
+    /// When the app wrote this; it rewrites at least every `WidgetPublisher.heartbeat`.
+    var updatedAt: Date
+    /// Written by the app as it quits.
+    var stopped = false
+
+    /// Older than this, the app is not running (it crashed or was killed).
+    static let maxAge: TimeInterval = 15 * 60
+
+    func isCurrent(at now: Date = Date()) -> Bool {
+        !stopped && now.timeIntervalSince(updatedAt) < Self.maxAge
+    }
+
+    /// Equal apart from when it was written.
+    func sameContent(as other: WidgetSnapshot) -> Bool {
+        var copy = other
+        copy.updatedAt = updatedAt
+        return copy == self
+    }
 
     static let placeholder = WidgetSnapshot(holding: true, phase: "Claude on a task", holdingSince: Date(), active: 1,
-                                            sessions: [Item(project: "vigil", activity: "working")],
-                                            todayTasks: 3, todayWorking: 2700)
+                                            sessions: [Item(project: "vigil", activity: .working)],
+                                            todayTasks: 3, todayWorking: 2700, updatedAt: Date())
 
     /// The real home folder: inside the widget's sandbox, NSHomeDirectory points at its container.
     static var url: URL {

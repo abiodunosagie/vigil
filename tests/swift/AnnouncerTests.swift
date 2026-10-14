@@ -38,7 +38,7 @@ enum AnnouncerTests {
             check(step(&a, [s("1", .working)], 3).isEmpty, "working is silent")
             check(step(&a, [s("1", .idle)], 6).isEmpty, "first idle is silent")
             check(step(&a, [s("1", .idle)], 6 + settle - 1).isEmpty, "not settled yet")
-            check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(project: "app")], "finished once settled")
+            check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(session: "1", project: "app")], "finished once settled")
             check(step(&a, [s("1", .idle)], 100).isEmpty, "finished only once")
             check(step(&a, [], 103).isEmpty, "closing after the announcement is silent")
         }
@@ -50,25 +50,25 @@ enum AnnouncerTests {
             check(step(&a, [s("1", .working)], 6).isEmpty, "back to work")
             check(step(&a, [s("1", .working)], 40).isEmpty, "no finished while working")
             _ = step(&a, [s("1", .idle)], 41)
-            check(step(&a, [s("1", .idle)], 41 + settle) == [.finished(project: "app")], "finished after real stop")
+            check(step(&a, [s("1", .idle)], 41 + settle) == [.finished(session: "1", project: "app")], "finished after real stop")
         }
         do {
             // Each question is announced once; answering and then stopping is a finish.
             var a = Announcer()
             _ = step(&a, [s("1", .working)], 0)
-            check(step(&a, [s("1", .waiting)], 3) == [.waiting(project: "app")], "waiting announced")
+            check(step(&a, [s("1", .waiting)], 3) == [.waiting(session: "1", project: "app")], "waiting announced")
             check(step(&a, [s("1", .waiting)], 30).isEmpty, "waiting announced once")
             _ = step(&a, [s("1", .working)], 33)
-            check(step(&a, [s("1", .waiting)], 36) == [.waiting(project: "app")], "second question announced")
+            check(step(&a, [s("1", .waiting)], 36) == [.waiting(session: "1", project: "app")], "second question announced")
             _ = step(&a, [s("1", .idle)], 40)
-            check(step(&a, [s("1", .idle)], 40 + settle) == [.finished(project: "app")], "waiting then idle finishes")
+            check(step(&a, [s("1", .idle)], 40 + settle) == [.finished(session: "1", project: "app")], "waiting then idle finishes")
         }
         do {
             // A one-shot session whose marker Claude Code removed after working.
             var a = Announcer()
             _ = step(&a, [], 0)
             _ = step(&a, [s("1", .working, "scratch")], 3)
-            check(step(&a, [], 6) == [.finished(project: "scratch")], "ended after work")
+            check(step(&a, [], 6) == [.finished(session: "1", project: "scratch")], "ended after work")
         }
         do {
             // Killed or closed mid-task: abandoned, not finished.
@@ -97,21 +97,21 @@ enum AnnouncerTests {
             _ = step(&a, [s("1", .working)], 0)
             _ = step(&a, [s("1", .stale)], 3)
             _ = step(&a, [s("1", .idle)], 6)
-            check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(project: "app")], "stale then idle finishes")
+            check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(session: "1", project: "app")], "stale then idle finishes")
         }
         do {
             // First seen quiet (after a Vigil restart), then a real Stop: that is a finish.
             var a = Announcer()
             _ = step(&a, [s("1", .stale)], 0)
             _ = step(&a, [s("1", .idle)], 3)
-            check(step(&a, [s("1", .idle)], 3 + settle) == [.finished(project: "app")], "first seen stale then idle")
+            check(step(&a, [s("1", .idle)], 3 + settle) == [.finished(session: "1", project: "app")], "first seen stale then idle")
         }
         do {
             // Stale then back to work: owes a finish again.
             var a = Announcer()
             _ = step(&a, [s("1", .stale)], 0)
             _ = step(&a, [s("1", .working)], 3)
-            check(step(&a, [], 6) == [.finished(project: "app")], "stale, working, ended")
+            check(step(&a, [], 6) == [.finished(session: "1", project: "app")], "stale, working, ended")
         }
         do {
             // Abandoned after a finish was already announced, or while waiting: silent.
@@ -133,14 +133,14 @@ enum AnnouncerTests {
             // A session that appears already waiting is announced.
             var a = Announcer()
             _ = step(&a, [], 0)
-            check(step(&a, [s("1", .waiting, nil)], 3) == [.waiting(project: nil)], "new waiting session")
+            check(step(&a, [s("1", .waiting, nil)], 3) == [.waiting(session: "1", project: nil)], "new waiting session")
         }
         do {
             // Sessions are tracked independently.
             var a = Announcer()
             _ = step(&a, [s("1", .working, "a"), s("2", .working, "b")], 0)
             _ = step(&a, [s("1", .idle, "a"), s("2", .working, "b")], 3)
-            check(step(&a, [s("1", .idle, "a"), s("2", .working, "b")], 3 + settle) == [.finished(project: "a")],
+            check(step(&a, [s("1", .idle, "a"), s("2", .working, "b")], 3 + settle) == [.finished(session: "1", project: "a")],
                   "only the finished one")
         }
         do {
@@ -162,7 +162,7 @@ enum AnnouncerTests {
             check(step(&a, [s("1", .background)], 3).isEmpty, "background is silent")
             check(step(&a, [s("1", .background)], 3 + settle * 3).isEmpty, "no finished while the command runs")
             _ = step(&a, [s("1", .idle)], 100)
-            check(step(&a, [s("1", .idle)], 100 + settle) == [.finished(project: "app")], "finished once the command ends")
+            check(step(&a, [s("1", .idle)], 100 + settle) == [.finished(session: "1", project: "app")], "finished once the command ends")
         }
         do {
             // The finished notice carries the turn length and tool calls.
@@ -173,7 +173,7 @@ enum AnnouncerTests {
                                   turnStarted: start, tools: 12)], 6)
             let out = step(&a, [Session(id: "1", project: "app", activity: .idle, updatedAt: t0.addingTimeInterval(5),
                                         turnStarted: start, tools: 12)], 6 + settle)
-            check(out == [.finished(project: "app", duration: 605, tools: 12)], "duration from prompt to Stop")
+            check(out == [.finished(session: "1", project: "app", duration: 605, tools: 12)], "duration from prompt to Stop")
         }
         do {
             // Format.
@@ -204,6 +204,43 @@ enum AnnouncerTests {
             log.append(.init(project: "old", finishedAt: old, duration: 1, tools: 1))
             log.prune(now: now)
             check(log.read(day: old).isEmpty && log.read(day: now).count == 3, "prune keeps today, drops old")
+        }
+        do {
+            // Markers: freshness and the Claude executable check.
+            let now = Date()
+            func marker(_ state: String, age: TimeInterval) -> Marker {
+                let json = #"{"state":"\#(state)","claude_pid":5,"updated_at":\#(now.timeIntervalSince1970 - age)}"#
+                return try! JSONDecoder().decode(Marker.self, from: Data(json.utf8))
+            }
+            check(marker("busy", age: 10).activity(now: now) == .working, "fresh busy works")
+            check(marker("busy", age: Marker.staleAfter + 1).activity(now: now) == .stale, "old busy is quiet")
+            check(marker("waiting", age: 10).activity(now: now) == .waiting, "fresh waiting")
+            check(marker("idle", age: Marker.staleAfter * 3).activity(now: now) == .idle, "idle never goes stale")
+            check(Marker.isClaudeExecutable("/Users/me/.local/share/claude/versions/2.1.299"), "native versions path")
+            check(Marker.isClaudeExecutable("/usr/local/bin/node"), "node")
+            check(!Marker.isClaudeExecutable("/bin/zsh"), "not a shell")
+        }
+        do {
+            // The root install command: quoting and what it writes.
+            check(LidHelper.quote("a b") == "'a b'", "spaces")
+            check(LidHelper.quote("it's") == #"'it'\''s'"#, "single quote")
+            let command = LidHelper.installCommand(script: Data("echo hi".utf8), plist: Data("<plist/>".utf8))
+            check(command.contains(Data("echo hi".utf8).base64EncodedString()), "script travels inside the command")
+            check(!command.contains("/var/folders") && !command.contains("/tmp/"), "nothing staged in a temp folder")
+            check(command.contains("chown root:wheel") && command.contains("plutil -lint"), "owned by root and checked")
+            check(Data(base64Encoded: LidScript.base64).map { String(decoding: $0, as: UTF8.self) }?
+                .hasPrefix("#!/bin/sh") == true, "embedded script is the helper")
+        }
+        do {
+            // Phone topic: long, random, from the alphabet only.
+            let a = VigilSettings.newTopic(), b = VigilSettings.newTopic()
+            check(a.count == 30 && a.hasPrefix("vigil-") && a != b, "topic shape")
+            check(a.dropFirst(6).allSatisfy { $0.isLowercase || $0.isNumber }, "topic alphabet")
+        }
+        do {
+            // Format for the panel and widget.
+            check(Format.today(tasks: 0, working: 0, longest: nil) == "Today: no finished tasks yet.", "empty today")
+            check(Format.today(tasks: 2, working: 900, longest: 600) == "Today: 2 tasks, 15 min working, longest 10 min.", "today")
         }
         print(failures == 0 ? "Announcer tests passed" : "\(failures) failed")
         exit(failures == 0 ? 0 : 1)

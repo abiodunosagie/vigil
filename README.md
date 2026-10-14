@@ -53,8 +53,10 @@ notifications; click Allow.
 - **Lid closed:** optional root helper (`lid/vigil-lid.sh`), installed from Settings with your
   admin password. While held and switched on, the Mac keeps running with the lid shut. It
   only reads the age of a heartbeat file Vigil refreshes; if Vigil quits, crashes or stops
-  holding, normal lid sleep is back within about 45 seconds. Below 10% on battery it always
-  lets the Mac sleep. Remove it from Settings.
+  holding, normal lid sleep is back within about a minute. Below 10% on battery it always
+  lets the Mac sleep. Remove it from Settings. If you ever delete its files by hand while it
+  holds, put lid sleep back with `sudo pmset -a disablesleep 0`. It never takes over a
+  `disablesleep` setting you made yourself.
 - **Phone alerts:** the same alerts through ntfy (free app, no account). Settings shows a long
   random topic; subscribe to it in the ntfy app. Anyone who knows the topic can read the
   alerts, so keep it private; "New topic" replaces it. Only the alert title and text are sent.
@@ -75,7 +77,7 @@ Check the hold any time with `pmset -g assertions | grep Vigil`.
 - Click the icon: status, every open Claude session with its project and state, today's
   total, the manual hold, Keep screen on, Mute, Launch at login, Settings and Quit.
 - Right click or Control click: Open Vigil, Settings and Quit Vigil.
-- Icon: a filled cup while Claude works, an outline cup during the 60 second grace, a moon when
+- Icon: a filled cup while Claude works, an outline cup during the grace time, a moon when
   the Mac can sleep. With more than one session working, the count shows next to it.
 
 ## Requirements

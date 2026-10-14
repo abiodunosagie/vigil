@@ -33,7 +33,11 @@ if [ -n "$HEART" ] && [ -f "$HEART" ] && [ ! -L "$HEART" ]; then
     now=$(/bin/date +%s)
     case "$modified" in
         ''|*[!0-9]*) ;;
-        *) [ $((now - modified)) -lt "$MAX_AGE" ] && fresh=1 ;;
+        *)
+            # A future time (clock change, or a forged mtime) is not fresh: it would never go stale.
+            age=$((now - modified))
+            [ "$age" -ge 0 ] && [ "$age" -lt "$MAX_AGE" ] && fresh=1
+            ;;
     esac
 fi
 
@@ -48,6 +52,10 @@ if echo "$battery" | /usr/bin/grep -q "Battery Power"; then
 fi
 
 if [ "$fresh" = 1 ]; then
+    # Sleep already disabled by hand: not ours to set, so not ours to undo later.
+    if [ ! -f "$STATE" ] && /usr/bin/pmset -g | /usr/bin/grep -Eq '^ *SleepDisabled[[:space:]]+1'; then
+        exit 0
+    fi
     if [ ! -f "$STATE" ]; then
         /bin/mkdir -p "/Library/Application Support/VigilLid"
         /usr/bin/pmset -a disablesleep 1 && /usr/bin/touch "$STATE"

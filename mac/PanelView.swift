@@ -103,10 +103,10 @@ struct PanelView: View {
             } else {
                 ForEach(watcher.rows) { row in
                     HStack(spacing: 8) {
-                        Circle().fill(Self.color(for: row.activity)).frame(width: 7, height: 7)
+                        Circle().fill(row.activity.tint).frame(width: 7, height: 7)
                         Text(row.project).lineLimit(1).truncationMode(.middle)
                         Spacer()
-                        Text("\(SessionWatcher.activityLabel(row.activity)), \(row.since.formatted(date: .omitted, time: .shortened))")
+                        Text("\(row.activity.label), \(row.since.formatted(date: .omitted, time: .shortened))")
                             .foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
@@ -120,11 +120,8 @@ struct PanelView: View {
 
     private var todayLine: some View {
         let today = watcher.today
-        let longest = today.longest.flatMap(\.duration).map { ", longest \(Format.length($0))" } ?? ""
-        let text = today.tasks == 0
-            ? "Today: no finished tasks yet."
-            : "Today: \(today.tasks) task\(today.tasks == 1 ? "" : "s"), \(Format.length(today.working)) working\(longest)."
-        return Text(text).font(.caption).foregroundStyle(.secondary)
+        return Text(Format.today(tasks: today.tasks, working: today.working, longest: today.longest?.duration))
+            .font(.caption).foregroundStyle(.secondary)
     }
 
     // MARK: manual hold
@@ -149,15 +146,7 @@ struct PanelView: View {
 
     // MARK: helpers
 
-    private static func color(for activity: Activity) -> Color {
-        switch activity {
-        case .working: .orange
-        case .waiting: .blue
-        case .background: .purple
-        case .idle, .stale: .secondary
-        }
-    }
-
+    /// A ticking clock style ("14m 3s"), unlike the rounded `Format.length`.
     static func duration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         let h = total / 3600, m = total / 60 % 60, s = total % 60

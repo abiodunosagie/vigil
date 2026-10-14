@@ -20,7 +20,8 @@ enum ProcessTree {
         var buffer = [pid_t](repeating: 0, count: 256)
         let bytes = proc_listchildpids(pid, &buffer, Int32(buffer.count * MemoryLayout<pid_t>.size))
         guard bytes > 0 else { return [] }
-        // The count comes back in pids on some releases and in bytes on others; both are capped.
+        // Returns the number of pids (checked on macOS 27: 10 children came back as 10).
+        // Capped at the buffer; a Claude session has a dozen children, not 256.
         let count = min(Int(bytes), buffer.count)
         return buffer.prefix(count).filter { $0 > 0 }
     }

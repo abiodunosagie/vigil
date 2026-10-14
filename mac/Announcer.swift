@@ -1,7 +1,8 @@
 import Foundation
 
-/// What one Claude Code session is doing, as Vigil sees it.
-enum Activity: Equatable {
+/// What one Claude Code session is doing, as Vigil sees it. The raw value is what the widget
+/// snapshot stores, so the app and the widget agree on the state, not on display text.
+enum Activity: String, Codable, Equatable {
     /// Running a task.
     case working
     /// Asked the user something mid-task (a permission prompt or a question).
@@ -17,6 +18,17 @@ enum Activity: Equatable {
 
     /// Holds the Mac awake.
     var isActive: Bool { self == .working || self == .waiting || self == .background }
+
+    /// The words the panel and the widget show.
+    var label: String {
+        switch self {
+        case .working: "working"
+        case .waiting: "needs you"
+        case .background: "running a command"
+        case .idle: "idle"
+        case .stale: "quiet"
+        }
+    }
 
     /// Panel order: working first, then waiting, then the rest.
     var rank: Int {
@@ -44,10 +56,11 @@ struct Session: Equatable {
 }
 
 /// Something worth a notification.
+/// Each carries the session id, so a click opens that session even when two share a project name.
 enum Announcement: Equatable {
     /// `duration` runs from the prompt to the moment the session went idle.
-    case finished(project: String?, duration: TimeInterval? = nil, tools: Int? = nil)
-    case waiting(project: String?)
+    case finished(session: String, project: String?, duration: TimeInterval? = nil, tools: Int? = nil)
+    case waiting(session: String, project: String?)
 }
 
 /// Turns successive scans of the sessions into notifications, and remembers since when each
@@ -74,10 +87,10 @@ struct Announcer {
         /// When the session last went idle, for the task length.
         var idleSince: Date?
 
-        func finished() -> Announcement {
+        func finished(_ id: String) -> Announcement {
             var duration: TimeInterval?
             if let turnStarted, let idleSince { duration = max(0, idleSince.timeIntervalSince(turnStarted)) }
-            return .finished(project: project, duration: duration, tools: tools)
+            return .finished(session: id, project: project, duration: duration, tools: tools)
         }
     }
 
@@ -111,7 +124,7 @@ struct Announcer {
                                            owesFinished: session.activity != .idle,
                                            turnStarted: session.turnStarted, tools: session.tools,
                                            idleSince: session.activity == .idle ? session.updatedAt : nil)
-                if seeded, session.activity == .waiting { out.append(.waiting(project: session.project)) }
+                if seeded, session.activity == .waiting { out.append(.waiting(session: session.id, project: session.project)) }
                 continue
             }
             if let project = session.project { track.project = project }
@@ -125,7 +138,7 @@ struct Announcer {
                 case .working: track.owesFinished = true
                 case .waiting:
                     track.owesFinished = true
-                    out.append(.waiting(project: track.project))
+                    out.append(.waiting(session: session.id, project: track.project))
                 case .idle:
                     // The marker's time is when the turn ended (a background command may have
                     // run on after it; the task length counts Claude's own turn).
@@ -135,7 +148,7 @@ struct Announcer {
             }
             if track.activity == .idle, track.owesFinished, uptime - track.changedAtUptime >= Self.settle {
                 track.owesFinished = false
-                out.append(track.finished())
+                out.append(track.finished(session.id))
             }
             tracks[session.id] = track
         }
@@ -145,7 +158,7 @@ struct Announcer {
             if ended {
                 var last = track
                 if last.idleSince == nil { last.idleSince = now }
-                out.append(last.finished())
+                out.append(last.finished(id))
             }
             tracks[id] = nil
         }

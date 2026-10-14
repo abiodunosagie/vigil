@@ -28,13 +28,16 @@ struct VigilWidgetView: View {
 
     var body: some View {
         Group {
-            if let snapshot = entry.snapshot {
+            if let snapshot = entry.snapshot, snapshot.isCurrent(at: entry.date) {
                 if family == .systemSmall { small(snapshot) } else { medium(snapshot) }
             } else {
+                // No snapshot, or one from a Vigil that quit or crashed: never show a stale hold.
                 VStack(alignment: .leading, spacing: 6) {
                     Image(systemName: "moon.zzz").font(.title2)
-                    Text("Open Vigil to start").font(.caption).foregroundStyle(.secondary)
+                    Text("Vigil is not running").font(.headline)
+                    Text("Open Vigil to start").font(.caption).opacity(0.7)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
         }
         .containerBackground(for: .widget) {
@@ -70,10 +73,10 @@ struct VigilWidgetView: View {
                 } else {
                     ForEach(Array(s.sessions.enumerated()), id: \.offset) { _, item in
                         HStack(spacing: 6) {
-                            Circle().fill(color(item.activity)).frame(width: 6, height: 6)
+                            Circle().fill(item.activity.tint).frame(width: 6, height: 6)
                             Text(item.project).font(.caption).lineLimit(1)
                             Spacer(minLength: 4)
-                            Text(item.activity).font(.caption2).opacity(0.6).lineLimit(1)
+                            Text(item.activity.label).font(.caption2).opacity(0.6).lineLimit(1)
                         }
                     }
                 }
@@ -82,21 +85,8 @@ struct VigilWidgetView: View {
             }
         }
     }
-
-    private func color(_ activity: String) -> Color {
-        switch activity {
-        case "working": .orange
-        case "needs you": .blue
-        case "running a command": .purple
-        default: .gray
-        }
-    }
-
     private func todayText(_ s: WidgetSnapshot) -> String {
-        guard s.todayTasks > 0 else { return "Today: no finished tasks yet" }
-        let minutes = Int(s.todayWorking / 60)
-        let worked = minutes < 60 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60) min"
-        return "Today: \(s.todayTasks) task\(s.todayTasks == 1 ? "" : "s"), \(worked)"
+        Format.today(tasks: s.todayTasks, working: s.todayWorking, longest: nil)
     }
 }
 

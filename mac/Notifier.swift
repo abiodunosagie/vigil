@@ -47,7 +47,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         case .finished: settings.finishedSound
         case .waiting: settings.waitingSound
         case .allDone: settings.allDoneSound
-        case .warning: "Basso"
+        case .warning: VigilSettings.warningSound
         }
     }
 
