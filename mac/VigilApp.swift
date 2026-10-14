@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.title = watcher.activeCount > 1 ? " \(watcher.activeCount)" : ""
         switch phase {
         case .working:
-            button.toolTip = "Vigil: keeping the Mac awake, Claude is working"
+            button.toolTip = "Vigil: keeping the Mac awake, Claude is on a task"
         case .finishing:
             button.toolTip = "Vigil: Claude finished, normal sleep resumes shortly"
         case .idle:

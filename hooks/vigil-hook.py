@@ -8,9 +8,9 @@ One script for every event. It writes one small marker file per Claude Code sess
   Notification: idle prompt, Stop                  -> state "idle"
   SessionEnd                                       -> marker removed
 
-The marker holds only the state, the pid of the owning `claude` process, a timestamp, and the
-name of the session's project folder (the last part of its working directory). Nothing else
-from the hook payload (prompt text, tool input or output, messages) is ever stored. Vigil treats a
+The marker holds only the state, the pid of the owning `claude` process, a timestamp, and
+the name of the session's project folder (the last part of its working directory). Nothing
+else from the hook payload (prompt text, tool input or output, messages) is ever stored. Vigil treats a
 marker as working only while that pid is a live `claude` process and the marker is recent,
 so a crashed, killed or interrupted session cannot keep the Mac awake.
 
@@ -49,6 +49,9 @@ _WALK_DEADLINE_SECONDS = 1.5
 # The shortest timeout handed to a single `ps` near the deadline.
 _MIN_PS_TIMEOUT = 0.05
 _MAX_PROJECT_NAME = 80
+# PostToolUse carries the tool output, so payloads can be large; a cut payload would not
+# parse. This only stops a runaway one from eating memory.
+_MAX_STDIN = 64 << 20
 
 
 def marker_path(session_id: str) -> Path | None:
@@ -144,7 +147,8 @@ def project_name(payload: dict) -> str | None:
 
 
 def write_marker(path: Path, state: str, claude_pid: int, project: str | None) -> None:
-    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    # Only this user may read which projects are open.
+    SESSIONS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     record: dict = {"state": state, "claude_pid": claude_pid, "updated_at": time.time()}
     if project:
         record["project"] = project
@@ -198,8 +202,7 @@ def handle(payload: dict, start_pid: int) -> None:
 
 def main() -> int:
     try:
-        # Read it all: PostToolUse carries the tool output, and a cut payload would not parse.
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read(_MAX_STDIN))
         if isinstance(payload, dict):
             handle(payload, os.getppid())
     except Exception:  # noqa: BLE001 - a hook failure must never reach Claude

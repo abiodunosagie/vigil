@@ -8,13 +8,13 @@ every session is done.
 
 - A small Claude Code hook (`hooks/vigil-hook.py`) runs on `UserPromptSubmit`, `PreToolUse`,
   `PostToolUse`, `Notification`, `Stop` and `SessionEnd`. It writes one marker per session to
-  `~/Library/Application Support/Vigil/sessions/` with four fields: the state (`busy`,
-  `waiting` or `idle`), the pid of the owning `claude` process, a timestamp, and the name of
-  the session's project folder. Prompt text, tool input and output, and messages are never
-  stored.
-- The app reads those markers every few seconds. While any session is busy and its `claude`
-  process is alive, it holds a `PreventUserIdleSystemSleep` power assertion. The screen can
-  still dim and sleep; the Mac itself stays up.
+  `~/Library/Application Support/Vigil/sessions/` (readable only by you) with up to four
+  fields: the state (`busy`, `waiting` or `idle`), the pid of the owning `claude` process, a
+  timestamp, and the name of the session's project folder when Claude Code sends it. Prompt
+  text, tool input and output, and messages are never stored.
+- The app reads those markers every few seconds. While any session is busy or waiting and its
+  `claude` process is alive, it holds a `PreventUserIdleSystemSleep` power assertion. The
+  screen can still dim and sleep; the Mac itself stays up.
 - When the last session stops, Vigil holds on for 60 more seconds (a Stop hook can send Claude
   straight back to work), then releases. From there macOS sleeps on your own Energy settings.
 - When Claude asks you something mid task (a permission prompt or a question), the session
@@ -23,12 +23,14 @@ every session is done.
 - A session only counts while its owner is still a running `claude` process. Markers whose
   process has died are deleted, so a crashed or closed session does not keep the Mac awake.
 - Claude Code fires no hook when you interrupt a turn with Esc. Every tool call refreshes the
-  marker, so a busy or waiting marker not refreshed for 45 minutes is treated as idle.
+  marker, so a busy or waiting marker not refreshed for 45 minutes stops holding the Mac. Such a
+  session shows as "quiet" and is never reported as finished.
 
 ## Notifications
 
 - **Claude finished:** a session that did work has stayed idle for 20 seconds (so a Stop hook
-  sending Claude straight back to work is not reported), or a working session ended.
+  sending Claude straight back to work is not reported), or a working session ended on its
+  own. Closing the terminal or killing `claude` mid task is not reported as finished.
 - **Claude needs you:** a session asked a permission question or another question.
 - **All Claude sessions are done:** the hold is released and the Mac sleeps normally again.
 

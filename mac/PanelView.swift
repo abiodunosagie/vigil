@@ -87,6 +87,7 @@ struct PanelView: View {
         case .working: "working since"
         case .waiting: "waiting since"
         case .idle: "idle since"
+        case .stale: "quiet since"
         }
     }
 
@@ -94,7 +95,7 @@ struct PanelView: View {
         switch activity {
         case .working: .orange
         case .waiting: .blue
-        case .idle: .secondary
+        case .idle, .stale: .secondary
         }
     }
 

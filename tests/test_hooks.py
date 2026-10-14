@@ -53,7 +53,7 @@ def test_prompt_marks_busy_with_owner_pid(sessions, owner):
     marker = _marker(sessions)
     assert marker["state"] == "busy"
     assert marker["claude_pid"] == 4242
-    assert set(marker) == {"state", "claude_pid", "updated_at"}  # no cwd in this payload
+    assert set(marker) == {"state", "claude_pid", "updated_at"}
     assert "secret" not in (sessions / "abc-123.json").read_text()
 
 
@@ -111,9 +111,9 @@ def test_project_is_the_folder_name_only(sessions, owner):
     hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123",
                  "cwd": "/Users/me/Projects/tools/vigil/", "tool_input": {"command": "secret"}}, 1)
     marker = _marker(sessions)
+    assert set(marker) == {"state", "claude_pid", "updated_at", "project"}
     assert marker["project"] == "vigil"
-    assert "Users" not in (sessions / "abc-123.json").read_text()
-    assert "secret" not in (sessions / "abc-123.json").read_text()
+    assert "/Users/me/Projects" not in (sessions / "abc-123.json").read_text()
 
 
 @pytest.mark.parametrize("cwd, expected", [
@@ -121,7 +121,15 @@ def test_project_is_the_folder_name_only(sessions, owner):
 ])
 def test_project_name_edge_cases(cwd, expected):
     assert hook.project_name({"cwd": cwd}) == expected
+
+
+def test_project_name_without_cwd():
     assert hook.project_name({}) is None
+
+
+def test_sessions_folder_is_private(sessions, owner):
+    hook.handle({"hook_event_name": "Stop", "session_id": "abc-123"}, 1)
+    assert sessions.stat().st_mode & 0o777 == 0o700
 
 
 def test_large_payload_still_parses(sessions, owner, monkeypatch):

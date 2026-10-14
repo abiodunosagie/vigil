@@ -9,74 +9,115 @@ func check(_ condition: Bool, _ name: String, line: Int = #line) {
     }
 }
 
-func s(_ id: String, _ activity: Activity, _ project: String? = "app") -> Session {
-    Session(id: id, project: project, activity: activity)
+let epoch = Date(timeIntervalSince1970: 1_800_000_000)
+
+func s(_ id: String, _ activity: Activity, _ project: String? = "app", at updated: TimeInterval = 0) -> Session {
+    Session(id: id, project: project, activity: activity, updatedAt: epoch.addingTimeInterval(updated))
+}
+
+/// One scan at `t` seconds, with wall clock and uptime moving together.
+func step(_ a: inout Announcer, _ sessions: [Session], _ t: TimeInterval,
+          unreadable: Set<String> = [], abandoned: Set<String> = []) -> [Announcement] {
+    a.update(sessions, unreadable: unreadable, abandoned: abandoned, uptime: t, now: epoch.addingTimeInterval(t))
 }
 
 @main
 enum AnnouncerTests {
     static func main() {
-        // First scan never announces, even a waiting session.
+        let settle = Announcer.settle
+
         do {
             var a = Announcer()
-            check(a.update([s("1", .waiting), s("2", .idle)], uptime: 0).isEmpty, "first scan is silent")
+            check(step(&a, [s("1", .waiting), s("2", .idle)], 0).isEmpty, "first scan is silent")
         }
-        // Work, then idle: finished only after the settle time.
         do {
             var a = Announcer()
-            _ = a.update([s("1", .idle)], uptime: 0)
-            check(a.update([s("1", .working)], uptime: 3).isEmpty, "working is silent")
-            check(a.update([s("1", .idle)], uptime: 6).isEmpty, "first idle is silent")
-            check(a.update([s("1", .idle)], uptime: 6 + Announcer.settle - 1).isEmpty, "not settled yet")
-            check(a.update([s("1", .idle)], uptime: 6 + Announcer.settle) == [.finished(project: "app")], "finished once settled")
-            check(a.update([s("1", .idle)], uptime: 100).isEmpty, "finished only once")
+            _ = step(&a, [s("1", .idle)], 0)
+            check(step(&a, [s("1", .working)], 3).isEmpty, "working is silent")
+            check(step(&a, [s("1", .idle)], 6).isEmpty, "first idle is silent")
+            check(step(&a, [s("1", .idle)], 6 + settle - 1).isEmpty, "not settled yet")
+            check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(project: "app")], "finished once settled")
+            check(step(&a, [s("1", .idle)], 100).isEmpty, "finished only once")
+            check(step(&a, [], 103).isEmpty, "closing after the announcement is silent")
         }
-        // A blocked Stop: idle for a moment, back to work, no false finished.
         do {
+            // A blocked Stop: idle for a moment, back to work, no false finished.
             var a = Announcer()
-            _ = a.update([s("1", .working)], uptime: 0)
-            _ = a.update([s("1", .idle)], uptime: 3)
-            check(a.update([s("1", .working)], uptime: 6).isEmpty, "back to work")
-            check(a.update([s("1", .working)], uptime: 40).isEmpty, "no finished while working")
-            _ = a.update([s("1", .idle)], uptime: 41)
-            check(a.update([s("1", .idle)], uptime: 41 + Announcer.settle) == [.finished(project: "app")], "finished after real stop")
+            _ = step(&a, [s("1", .working)], 0)
+            _ = step(&a, [s("1", .idle)], 3)
+            check(step(&a, [s("1", .working)], 6).isEmpty, "back to work")
+            check(step(&a, [s("1", .working)], 40).isEmpty, "no finished while working")
+            _ = step(&a, [s("1", .idle)], 41)
+            check(step(&a, [s("1", .idle)], 41 + settle) == [.finished(project: "app")], "finished after real stop")
         }
-        // Waiting is announced on each entry; answering and finishing then announces finished.
         do {
             var a = Announcer()
-            _ = a.update([s("1", .working)], uptime: 0)
-            check(a.update([s("1", .waiting)], uptime: 3) == [.waiting(project: "app")], "waiting announced")
-            check(a.update([s("1", .waiting)], uptime: 30).isEmpty, "waiting announced once")
-            _ = a.update([s("1", .working)], uptime: 33)
-            check(a.update([s("1", .waiting)], uptime: 36) == [.waiting(project: "app")], "second question announced")
+            _ = step(&a, [s("1", .working)], 0)
+            check(step(&a, [s("1", .waiting)], 3) == [.waiting(project: "app")], "waiting announced")
+            check(step(&a, [s("1", .waiting)], 30).isEmpty, "waiting announced once")
+            _ = step(&a, [s("1", .working)], 33)
+            check(step(&a, [s("1", .waiting)], 36) == [.waiting(project: "app")], "second question announced")
+            _ = step(&a, [s("1", .idle)], 40)
+            check(step(&a, [s("1", .idle)], 40 + settle) == [.finished(project: "app")], "waiting then idle finishes")
         }
-        // A one-shot session that vanishes after working counts as finished.
         do {
+            // A one-shot session whose marker Claude Code removed after working.
             var a = Announcer()
-            _ = a.update([], uptime: 0)
-            _ = a.update([s("1", .working, "scratch")], uptime: 3)
-            check(a.update([], uptime: 6) == [.finished(project: "scratch")], "vanished after work")
+            _ = step(&a, [], 0)
+            _ = step(&a, [s("1", .working, "scratch")], 3)
+            check(step(&a, [], 6) == [.finished(project: "scratch")], "ended after work")
         }
-        // A session closed while idle and already announced, or while waiting, says nothing.
         do {
+            // Killed or closed mid-task: abandoned, not finished.
             var a = Announcer()
-            _ = a.update([s("1", .idle), s("2", .working)], uptime: 0)
-            _ = a.update([s("1", .idle), s("2", .waiting)], uptime: 3)
-            check(a.update([], uptime: 6).isEmpty, "closing idle or waiting is silent")
+            _ = step(&a, [s("1", .working)], 0)
+            check(step(&a, [], 3, abandoned: ["1"]).isEmpty, "abandoned is silent")
         }
-        // A new session seen after the first scan already waiting is announced.
         do {
             var a = Announcer()
-            _ = a.update([], uptime: 0)
-            check(a.update([s("1", .waiting, nil)], uptime: 3) == [.waiting(project: nil)], "new waiting session")
+            _ = step(&a, [s("1", .working)], 0)
+            _ = step(&a, [s("1", .waiting)], 3)
+            check(step(&a, [], 6).isEmpty, "closing while waiting is silent")
         }
-        // Sessions are tracked independently.
+        do {
+            // Gone quiet for too long: no finished, now or later.
+            var a = Announcer()
+            _ = step(&a, [s("1", .working)], 0)
+            check(step(&a, [s("1", .stale)], 3).isEmpty, "stale is silent")
+            check(step(&a, [s("1", .stale)], 3 + settle).isEmpty, "stale stays silent")
+            check(step(&a, [], 60).isEmpty, "stale then closed is silent")
+        }
+        do {
+            // An unreadable marker for one scan changes nothing.
+            var a = Announcer()
+            _ = step(&a, [s("1", .working)], 0)
+            check(step(&a, [], 3, unreadable: ["1"]).isEmpty, "unreadable is kept")
+            check(step(&a, [s("1", .working)], 6).isEmpty, "back after unreadable")
+            check(a.since("1") == epoch, "since survives an unreadable scan")
+        }
         do {
             var a = Announcer()
-            _ = a.update([s("1", .working, "a"), s("2", .working, "b")], uptime: 0)
-            _ = a.update([s("1", .idle, "a"), s("2", .working, "b")], uptime: 3)
-            check(a.update([s("1", .idle, "a"), s("2", .working, "b")], uptime: 3 + Announcer.settle) == [.finished(project: "a")],
+            _ = step(&a, [], 0)
+            check(step(&a, [s("1", .waiting, nil)], 3) == [.waiting(project: nil)], "new waiting session")
+        }
+        do {
+            var a = Announcer()
+            _ = step(&a, [s("1", .working, "a"), s("2", .working, "b")], 0)
+            _ = step(&a, [s("1", .idle, "a"), s("2", .working, "b")], 3)
+            check(step(&a, [s("1", .idle, "a"), s("2", .working, "b")], 3 + settle) == [.finished(project: "a")],
                   "only the finished one")
+        }
+        do {
+            // Since: first sight takes the marker time; a change takes the scan time; no change keeps it.
+            var a = Announcer()
+            _ = step(&a, [s("1", .working, at: -3600)], 0)
+            check(a.since("1") == epoch.addingTimeInterval(-3600), "first sight uses the marker time")
+            _ = step(&a, [s("1", .working, at: 5)], 10)
+            check(a.since("1") == epoch.addingTimeInterval(-3600), "unchanged keeps since")
+            _ = step(&a, [s("1", .idle, at: 12)], 15)
+            check(a.since("1") == epoch.addingTimeInterval(15), "a change stamps the scan time")
+            _ = step(&a, [s("1", .idle, nil)], 18)
+            check(a.project("1") == "app", "project remembered when the marker has none")
         }
         print(failures == 0 ? "Announcer tests passed" : "\(failures) failed")
         exit(failures == 0 ? 0 : 1)
