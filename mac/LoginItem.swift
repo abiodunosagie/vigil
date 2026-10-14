@@ -1,9 +1,8 @@
 import Combine
 import Foundation
 
-/// Starts Vigil at login through a user LaunchAgent, the same way the owner's other menu bar
-/// apps do. Unlike SMAppService, it needs no approval in System Settings for an ad hoc
-/// signed app built on this Mac.
+/// Starts Vigil at login through a user LaunchAgent. Unlike SMAppService, a LaunchAgent needs
+/// no approval in System Settings for an ad hoc signed app built on this Mac.
 enum LoginItem {
     static let label = AppInfo.bundleID
 

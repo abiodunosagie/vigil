@@ -12,7 +12,7 @@ mkdir -p "$BUILD"
 echo "Compiling..."
 xcrun swiftc -O -parse-as-library -target arm64-apple-macos15.0 \
   -o "$BUILD/Vigil" "$PROJECT"/mac/*.swift \
-  -framework AppKit -framework SwiftUI -framework IOKit
+  -framework AppKit -framework SwiftUI -framework IOKit -framework UserNotifications
 
 echo "Drawing icon..."
 rm -rf "$BUILD/Vigil.iconset"

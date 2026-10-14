@@ -45,12 +45,22 @@ struct PanelView: View {
     }
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            row("Claude sessions open", "\(watcher.openCount)")
-            row("Working now", "\(watcher.workingCount)")
-            // Only this row ticks every second.
+        VStack(alignment: .leading, spacing: 8) {
+            if watcher.rows.isEmpty {
+                Text("No Claude sessions open.").foregroundStyle(.secondary)
+            } else {
+                ForEach(watcher.rows) { row in
+                    sessionRow(row)
+                }
+            }
+            // Only this row ticks every second, so the rest of the panel is not redrawn.
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                row("Keeping awake for", watcher.holdingSince.map { Self.duration(context.date.timeIntervalSince($0)) } ?? "Not holding")
+                HStack {
+                    Text("Keeping awake for").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(watcher.holdingSince.map { Self.duration(context.date.timeIntervalSince($0)) } ?? "Not holding")
+                        .monospacedDigit()
+                }
             }
             if let problem = watcher.problem {
                 Text(problem).font(.caption).foregroundStyle(.red)
@@ -59,11 +69,32 @@ struct PanelView: View {
         .font(.callout)
     }
 
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
+    private func sessionRow(_ row: SessionWatcher.Row) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Self.color(for: row.activity))
+                .frame(width: 7, height: 7)
+            Text(row.project).lineLimit(1).truncationMode(.middle)
             Spacer()
-            Text(value).monospacedDigit()
+            Text("\(Self.label(for: row.activity)), \(row.since.formatted(date: .omitted, time: .shortened))")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
+    private static func label(for activity: Activity) -> String {
+        switch activity {
+        case .working: "working since"
+        case .waiting: "waiting since"
+        case .idle: "idle since"
+        }
+    }
+
+    private static func color(for activity: Activity) -> Color {
+        switch activity {
+        case .working: .orange
+        case .waiting: .blue
+        case .idle: .secondary
         }
     }
 
@@ -78,7 +109,7 @@ struct PanelView: View {
     private var subtitle: String {
         switch watcher.phase {
         case .working:
-            "Claude is on a task."
+            watcher.activeCount == 1 ? "A Claude session is on a task." : "\(watcher.activeCount) Claude sessions are on tasks."
         case .finishing(let until):
             "Normal sleep resumes at \(until.formatted(date: .omitted, time: .shortened))."
         case .idle:

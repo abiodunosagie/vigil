@@ -3,12 +3,14 @@
 
 One script for every event. It writes one small marker file per Claude Code session:
 
-  UserPromptSubmit, PreToolUse, PostToolUse  -> state "busy"
-  Stop, Notification (waiting on you)        -> state "idle"
-  SessionEnd                                 -> marker removed
+  UserPromptSubmit, PreToolUse, PostToolUse        -> state "busy"
+  Notification: permission prompt or question      -> state "waiting"
+  Notification: idle prompt, Stop                  -> state "idle"
+  SessionEnd                                       -> marker removed
 
-The marker holds only the state, the pid of the owning `claude` process and a timestamp.
-Nothing else from the hook payload (prompt text, tool input) is ever stored. Vigil treats a
+The marker holds only the state, the pid of the owning `claude` process, a timestamp, and the
+name of the session's project folder (the last part of its working directory). Nothing else
+from the hook payload (prompt text, tool input or output, messages) is ever stored. Vigil treats a
 marker as working only while that pid is a live `claude` process and the marker is recent,
 so a crashed, killed or interrupted session cannot keep the Mac awake.
 
@@ -29,11 +31,12 @@ from pathlib import Path
 SESSIONS_DIR = Path.home() / "Library" / "Application Support" / "Vigil" / "sessions"
 
 BUSY_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse"}
-# A Notification means Claude waits on the user (a permission prompt, an idle prompt, a
-# question); nothing moves until they answer, so the Mac may sleep. A sign-in success
-# notification is the exception: work carries on.
 NOTIFICATION = "Notification"
-NOTIFICATIONS_STILL_WORKING = {"auth_success"}
+# Claude asks the user something mid-task. Vigil keeps the Mac awake (the answer usually
+# starts a tool that fires no hook until it finishes) and tells the user it is waiting.
+WAITING_NOTIFICATIONS = {"permission_prompt", "elicitation_dialog"}
+# Claude finished and has sat at the prompt for a while.
+IDLE_NOTIFICATIONS = {"idle_prompt"}
 STOP = "Stop"
 SESSION_END = "SessionEnd"
 
@@ -41,10 +44,11 @@ SESSION_END = "SessionEnd"
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 # Hooks run through a shell or two below `claude`; never walk further than this.
 _MAX_HOPS = 12
-# The whole walk must finish well inside the hook timeout the installer sets (5 s).
+# The whole walk must finish well inside the hook timeout (TIMEOUT_SECONDS in install_hooks.py).
 _WALK_DEADLINE_SECONDS = 1.5
-# Payloads are small; never read an unbounded stdin.
-_MAX_STDIN = 1 << 20
+# The shortest timeout handed to a single `ps` near the deadline.
+_MIN_PS_TIMEOUT = 0.05
+_MAX_PROJECT_NAME = 80
 
 
 def marker_path(session_id: str) -> Path | None:
@@ -56,7 +60,7 @@ def _ps(pid: int, columns: tuple[str, ...], timeout: float) -> str:
     # "name=" on every column suppresses the header line.
     return subprocess.run(
         ["ps", "-o", ",".join(f"{c}=" for c in columns), "-p", str(pid)],
-        capture_output=True, text=True, timeout=max(timeout, 0.05), check=False,
+        capture_output=True, text=True, timeout=max(timeout, _MIN_PS_TIMEOUT), check=False,
     ).stdout.strip()
 
 
@@ -79,11 +83,12 @@ def process_info(pid: int, timeout: float) -> tuple[int, str, str] | None:
 def is_claude(command: str, args: str) -> bool:
     """The native `claude` binary, or a Node install running the Claude Code CLI.
 
-    For Node, an npm install runs `.../@anthropic-ai/claude-code/cli.js` and a global shim
+    The native binary is usually started through the `claude` link; started by its real path
+    it shows as `.../claude/versions/<version>`. For Node, an npm install runs `.../@anthropic-ai/claude-code/cli.js` and a global shim
     runs `.../bin/claude`. A false match only ties the marker to the wrong long-lived parent,
     which then still dies with the terminal, so a loose check is acceptable here.
     """
-    if os.path.basename(command) == "claude":
+    if os.path.basename(command) == "claude" or "/claude/versions/" in command:
         return True
     return os.path.basename(command) == "node" and ("claude-code" in args or "/claude " in f"{args} ")
 
@@ -129,9 +134,21 @@ def cached_pid(path: Path) -> int | None:
     return pid if isinstance(pid, int) and pid > 1 and pid_alive(pid) else None
 
 
-def write_marker(path: Path, state: str, claude_pid: int) -> None:
+def project_name(payload: dict) -> str | None:
+    """The last part of the session's working directory, for "Claude finished in <name>"."""
+    cwd = payload.get("cwd")
+    if not isinstance(cwd, str):
+        return None
+    name = "".join(ch for ch in os.path.basename(cwd.rstrip("/")) if ch.isprintable())
+    return name[:_MAX_PROJECT_NAME] or None
+
+
+def write_marker(path: Path, state: str, claude_pid: int, project: str | None) -> None:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    data = json.dumps({"state": state, "claude_pid": claude_pid, "updated_at": time.time()})
+    record: dict = {"state": state, "claude_pid": claude_pid, "updated_at": time.time()}
+    if project:
+        record["project"] = project
+    data = json.dumps(record)
     fd, tmp = tempfile.mkstemp(dir=SESSIONS_DIR, prefix=".tmp-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -149,7 +166,10 @@ def state_for(payload: dict, event: str) -> str | None:
         return "idle"
     if event == NOTIFICATION:
         kind = payload.get("notification_type")
-        return "busy" if kind in NOTIFICATIONS_STILL_WORKING else "idle"
+        if kind in WAITING_NOTIFICATIONS:
+            return "waiting"
+        if kind in IDLE_NOTIFICATIONS:
+            return "idle"
     return None
 
 
@@ -173,12 +193,13 @@ def handle(payload: dict, start_pid: int) -> None:
     if claude_pid is None:
         # No live owner to tie the marker to; Vigil would discard it anyway.
         return
-    write_marker(path, state, claude_pid)
+    write_marker(path, state, claude_pid, project_name(payload))
 
 
 def main() -> int:
     try:
-        payload = json.loads(sys.stdin.read(_MAX_STDIN))
+        # Read it all: PostToolUse carries the tool output, and a cut payload would not parse.
+        payload = json.loads(sys.stdin.read())
         if isinstance(payload, dict):
             handle(payload, os.getppid())
     except Exception:  # noqa: BLE001 - a hook failure must never reach Claude

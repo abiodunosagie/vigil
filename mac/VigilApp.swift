@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let phase = watcher.phase
         button.image = NSImage(systemSymbolName: VigilIcon.symbol(for: phase), accessibilityDescription: "Vigil")
         button.image?.isTemplate = true
-        button.title = watcher.workingCount > 1 ? " \(watcher.workingCount)" : ""
+        button.title = watcher.activeCount > 1 ? " \(watcher.activeCount)" : ""
         switch phase {
         case .working:
             button.toolTip = "Vigil: keeping the Mac awake, Claude is working"

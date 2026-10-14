@@ -53,7 +53,7 @@ def test_prompt_marks_busy_with_owner_pid(sessions, owner):
     marker = _marker(sessions)
     assert marker["state"] == "busy"
     assert marker["claude_pid"] == 4242
-    assert set(marker) == {"state", "claude_pid", "updated_at"}
+    assert set(marker) == {"state", "claude_pid", "updated_at"}  # no cwd in this payload
     assert "secret" not in (sessions / "abc-123.json").read_text()
 
 
@@ -81,19 +81,54 @@ def test_post_tool_use_marks_busy_again(sessions, owner):
     assert _marker(sessions)["state"] == "busy"
 
 
-@pytest.mark.parametrize("kind", ["permission_prompt", "idle_prompt", "elicitation_dialog", None])
-def test_waiting_notifications_mark_idle(sessions, owner, kind):
-    hook.handle({"hook_event_name": "UserPromptSubmit", "session_id": "abc-123"}, 1)
-    payload = {"hook_event_name": "Notification", "session_id": "abc-123", "message": "secret"}
-    if kind:
-        payload["notification_type"] = kind
+@pytest.mark.parametrize("kind", ["permission_prompt", "elicitation_dialog"])
+def test_questions_mark_waiting(sessions, owner, kind):
+    hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123"}, 1)
+    payload = {"hook_event_name": "Notification", "session_id": "abc-123", "message": "secret",
+               "notification_type": kind}
     hook.handle(payload, 1)
-    assert _marker(sessions)["state"] == "idle"
+    assert _marker(sessions)["state"] == "waiting"
     assert "secret" not in (sessions / "abc-123.json").read_text()
 
 
-def test_auth_success_notification_keeps_working(sessions, owner):
-    hook.handle({"hook_event_name": "Notification", "session_id": "abc-123", "notification_type": "auth_success"}, 1)
+def test_idle_prompt_marks_idle(sessions, owner):
+    hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123"}, 1)
+    hook.handle({"hook_event_name": "Notification", "session_id": "abc-123", "notification_type": "idle_prompt"}, 1)
+    assert _marker(sessions)["state"] == "idle"
+
+
+@pytest.mark.parametrize("kind", ["auth_success", "something_new", None])
+def test_other_notifications_leave_the_state(sessions, owner, kind):
+    hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123"}, 1)
+    payload = {"hook_event_name": "Notification", "session_id": "abc-123"}
+    if kind:
+        payload["notification_type"] = kind
+    hook.handle(payload, 1)
+    assert _marker(sessions)["state"] == "busy"
+
+
+def test_project_is_the_folder_name_only(sessions, owner):
+    hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123",
+                 "cwd": "/Users/me/Projects/tools/vigil/", "tool_input": {"command": "secret"}}, 1)
+    marker = _marker(sessions)
+    assert marker["project"] == "vigil"
+    assert "Users" not in (sessions / "abc-123.json").read_text()
+    assert "secret" not in (sessions / "abc-123.json").read_text()
+
+
+@pytest.mark.parametrize("cwd, expected", [
+    ("/", None), ("", None), (5, None), ("/a/" + "x" * 200, "x" * 80), ("/a/b\x07c", "bc"),
+])
+def test_project_name_edge_cases(cwd, expected):
+    assert hook.project_name({"cwd": cwd}) == expected
+    assert hook.project_name({}) is None
+
+
+def test_large_payload_still_parses(sessions, owner, monkeypatch):
+    big = json.dumps({"hook_event_name": "PostToolUse", "session_id": "abc-123", "tool_response": "x" * (3 << 20)})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(big))
+    monkeypatch.setattr(os, "getppid", lambda: 1)
+    assert hook.main() == 0
     assert _marker(sessions)["state"] == "busy"
 
 
@@ -143,6 +178,7 @@ def test_corrupt_marker_is_replaced(sessions, monkeypatch):
 def test_is_claude_matches_native_and_node_installs():
     assert hook.is_claude("claude", "claude")
     assert hook.is_claude("/Users/me/.local/bin/claude", "claude --resume")
+    assert hook.is_claude("/Users/me/.local/share/claude/versions/2.1.299", "2.1.299")
     assert hook.is_claude("node", "node /opt/lib/node_modules/@anthropic-ai/claude-code/cli.js")
     assert not hook.is_claude("zsh", "-zsh")
     assert not hook.is_claude("node", "node server.js")
