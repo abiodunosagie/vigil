@@ -17,6 +17,16 @@ final class WidgetPublisher {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
+    /// The widget's one line status.
+    static func phaseText(_ phase: SessionWatcher.Phase, manual: Bool, blocked: Bool) -> String {
+        if blocked { return "Battery low" }
+        switch phase {
+        case .working: return "Claude on a task"
+        case .finishing: return "Just finished"
+        case .idle: return manual ? "Manual hold" : "Mac can sleep"
+        }
+    }
+
     func publishStopped() {
         publish(WidgetSnapshot(holding: false, phase: "Vigil is not running", holdingSince: nil, active: 0,
                                sessions: [], todayTasks: last?.todayTasks ?? 0, todayWorking: last?.todayWorking ?? 0,

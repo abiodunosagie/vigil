@@ -15,8 +15,9 @@ every session is done.
 - The app reads those markers every few seconds. While any session is busy or waiting and its
   `claude` process is alive, it holds a `PreventUserIdleSystemSleep` power assertion. The
   screen can still dim and sleep; the Mac itself stays up.
-- When the last session stops, Vigil holds on for 60 more seconds (a Stop hook can send Claude
-  straight back to work), then releases. From there macOS sleeps on your own Energy settings.
+- When the last session stops, Vigil holds on for the grace time, 60 seconds by default (a
+  Stop hook can send Claude straight back to work), then releases. From there macOS sleeps on
+  your own Energy settings.
 - When Claude asks you something mid task (a permission prompt or a question), the session
   counts as waiting: the Mac stays awake, because your answer usually starts a command that
   fires no hook until it finishes.

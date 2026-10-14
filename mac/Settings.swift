@@ -2,8 +2,8 @@ import Combine
 import Foundation
 import Security
 
-/// Every choice the user can make, kept in UserDefaults. Each key and its default live once,
-/// in `Key`.
+/// Every choice the user can make, kept in UserDefaults. Each key's name and default live
+/// once, in `Key`.
 @MainActor
 final class VigilSettings: ObservableObject {
     static let shared = VigilSettings()
@@ -81,7 +81,7 @@ final class VigilSettings: ObservableObject {
         batteryGuard = defaults.bool(forKey: Key.batteryGuard.rawValue)
         batteryFloor = defaults.integer(forKey: Key.batteryFloor.rawValue)
         muted = defaults.bool(forKey: Key.muted.rawValue)
-        // register(defaults:) guarantees a value for every key with a default.
+        // register(defaults:) gives these a value; the empty fallback only satisfies the type.
         finishedSound = defaults.string(forKey: Key.finishedSound.rawValue) ?? ""
         waitingSound = defaults.string(forKey: Key.waitingSound.rawValue) ?? ""
         allDoneSound = defaults.string(forKey: Key.allDoneSound.rawValue) ?? ""

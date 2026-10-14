@@ -1,11 +1,9 @@
 import Combine
-import Darwin
 import Foundation
-import WidgetKit
 
-/// Reads the markers the Claude Code hook writes, keeps the Mac awake while any session is
-/// on a task (or the user asked for a manual hold), and tells the user when sessions finish
-/// or need them.
+/// Ties Vigil together: each tick it reads the sessions (MarkerScanner), turns changes into
+/// notifications and log entries (Announcer, DailyLog), holds or releases the Mac (SleepGuard,
+/// LidHelper, battery guard, manual hold) and updates the widget (WidgetPublisher).
 ///
 /// A session holds the Mac while its marker says "busy" or "waiting", the marker is recent,
 /// and its `claude` process is alive, or while a command Claude started is still running
@@ -149,7 +147,7 @@ final class SessionWatcher: ObservableObject {
         Self.assign(next, to: &phase)
         apply()
         widget.publish(WidgetSnapshot(
-            holding: isHolding, phase: Format.widgetPhase(phase, manual: manualUntil != nil, blocked: batteryBlocked),
+            holding: isHolding, phase: WidgetPublisher.phaseText(phase, manual: manualUntil != nil, blocked: batteryBlocked),
             holdingSince: holdingSince, active: activeCount,
             sessions: rows.prefix(4).map { WidgetSnapshot.Item(project: $0.project, activity: $0.activity) },
             todayTasks: today.tasks, todayWorking: today.working, updatedAt: now))
@@ -252,17 +250,5 @@ final class SessionWatcher: ObservableObject {
 
     private static func assign<T: Equatable>(_ value: T, to target: inout T) {
         if target != value { target = value }
-    }
-}
-
-extension Format {
-    /// The widget's one line status.
-    static func widgetPhase(_ phase: SessionWatcher.Phase, manual: Bool, blocked: Bool) -> String {
-        if blocked { return "Battery low" }
-        switch phase {
-        case .working: return "Claude on a task"
-        case .finishing: return "Just finished"
-        case .idle: return manual ? "Manual hold" : "Mac can sleep"
-        }
     }
 }

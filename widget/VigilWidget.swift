@@ -16,9 +16,14 @@ struct Provider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
-        // The app reloads on every change; this is only a fallback if it is not running.
-        completion(Timeline(entries: [Entry(date: .now, snapshot: WidgetSnapshot.read())],
-                            policy: .after(.now.addingTimeInterval(15 * 60))))
+        // The app reloads on every change. If it dies, the second entry turns the widget to
+        // "not running" exactly when the snapshot goes out of date.
+        let snapshot = WidgetSnapshot.read()
+        var entries = [Entry(date: .now, snapshot: snapshot)]
+        if let snapshot, !snapshot.stopped {
+            entries.append(Entry(date: snapshot.updatedAt.addingTimeInterval(WidgetSnapshot.maxAge), snapshot: snapshot))
+        }
+        completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(15 * 60))))
     }
 }
 
@@ -85,6 +90,7 @@ struct VigilWidgetView: View {
             }
         }
     }
+
     private func todayText(_ s: WidgetSnapshot) -> String {
         Format.today(tasks: s.todayTasks, working: s.todayWorking, longest: nil)
     }

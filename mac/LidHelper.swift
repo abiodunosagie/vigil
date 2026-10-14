@@ -16,6 +16,15 @@ enum LidHelper {
         FileManager.default.fileExists(atPath: script) && FileManager.default.fileExists(atPath: plist)
     }
 
+    /// The installed helper is the one built into this Vigil. An older copy (installed before
+    /// a fix) is reported so Settings can offer to update it; the script is root owned but
+    /// readable.
+    static var isCurrent: Bool {
+        guard let installed = FileManager.default.contents(atPath: script),
+              let bundled = Data(base64Encoded: LidScript.base64) else { return false }
+        return installed == bundled
+    }
+
     /// Logged once per run, not on every 3 second tick.
     nonisolated(unsafe) private static var reportedBeatFailure = false
 

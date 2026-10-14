@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: VigilSettings
     @State private var lidInstalled = LidHelper.isInstalled
+    @State private var lidCurrent = LidHelper.isCurrent
     @State private var lidMessage: String?
     @State private var phoneMessage: String?
 
@@ -27,9 +28,13 @@ struct SettingsView: View {
                 Toggle("Stay awake with the lid closed", isOn: $settings.lidClosed)
                     .disabled(!lidInstalled)
                 HStack {
-                    Text(lidInstalled ? "Lid helper installed." : "Needs a small helper, installed once with your admin password.")
+                    Text(!lidInstalled ? "Needs a small helper, installed once with your admin password."
+                         : lidCurrent ? "Lid helper installed." : "An older lid helper is installed. Update it.")
                         .foregroundStyle(.secondary)
                     Spacer()
+                    if lidInstalled, !lidCurrent {
+                        Button("Update helper") { updateLidHelper() }
+                    }
                     Button(lidInstalled ? "Remove helper" : "Install helper") { toggleLidHelper() }
                 }
                 if let lidMessage { Text(lidMessage).font(.caption).foregroundStyle(.secondary) }
@@ -115,6 +120,20 @@ struct SettingsView: View {
             lidMessage = "That did not work. Nothing was changed."
         }
         lidInstalled = LidHelper.isInstalled
+        lidCurrent = LidHelper.isCurrent
+    }
+
+    private func updateLidHelper() {
+        do {
+            try LidHelper.install()
+            lidMessage = "Helper updated."
+        } catch LidHelper.Failure.cancelled {
+            lidMessage = nil
+        } catch {
+            lidMessage = "That did not work. The old helper is still in place."
+        }
+        lidInstalled = LidHelper.isInstalled
+        lidCurrent = LidHelper.isCurrent
     }
 
     private func sendTest() {

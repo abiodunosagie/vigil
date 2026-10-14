@@ -1,6 +1,7 @@
 import Foundation
 
-/// Text for notifications, the panel, the widget and the log.
+/// Text for notifications, the panel, the widget and the log (the widget's one line status
+/// needs the app's phase, so it lives in WidgetPublisher).
 enum Format {
     static let finishedTitle = "Claude finished"
     static let waitingTitle = "Claude needs you"
