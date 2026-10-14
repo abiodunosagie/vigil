@@ -53,7 +53,7 @@ def test_prompt_marks_busy_with_owner_pid(sessions, owner):
     marker = _marker(sessions)
     assert marker["state"] == "busy"
     assert marker["claude_pid"] == 4242
-    assert set(marker) == {"state", "claude_pid", "updated_at"}  # no cwd, so no project
+    assert set(marker) == {"state", "claude_pid", "updated_at", "turn_started", "tools"}  # no cwd, so no project
     assert "secret" not in (sessions / "abc-123.json").read_text()
 
 
@@ -111,7 +111,7 @@ def test_project_is_the_folder_name_only(sessions, owner):
     hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123",
                  "cwd": "/Users/me/Projects/tools/vigil/", "tool_input": {"command": "secret"}}, 1)
     marker = _marker(sessions)
-    assert set(marker) == {"state", "claude_pid", "updated_at", "project"}
+    assert set(marker) == {"state", "claude_pid", "updated_at", "turn_started", "tools", "project"}
     assert marker["project"] == "vigil"
     text = (sessions / "abc-123.json").read_text()
     assert "Users" not in text and "Projects" not in text
@@ -169,6 +169,27 @@ def test_cached_owner_skips_the_walk_while_alive(sessions, monkeypatch):
     hook.handle({"hook_event_name": "UserPromptSubmit", "session_id": "abc-123"}, 1)
     hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123"}, 1)
     assert len(calls) == 1
+
+
+def test_turn_counts_tool_calls_and_resets_on_prompt(sessions, owner, monkeypatch):
+    clock = iter([100.0, 101.0, 102.0, 103.0, 200.0, 201.0])
+    monkeypatch.setattr(hook.time, "time", lambda: next(clock))
+    hook.handle({"hook_event_name": "UserPromptSubmit", "session_id": "abc-123"}, 1)
+    hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123"}, 1)
+    hook.handle({"hook_event_name": "PostToolUse", "session_id": "abc-123"}, 1)
+    hook.handle({"hook_event_name": "PreToolUse", "session_id": "abc-123"}, 1)
+    marker = _marker(sessions)
+    assert (marker["turn_started"], marker["tools"]) == (100.0, 2)
+    hook.handle({"hook_event_name": "Stop", "session_id": "abc-123"}, 1)
+    assert (_marker(sessions)["turn_started"], _marker(sessions)["tools"]) == (100.0, 2)
+    hook.handle({"hook_event_name": "UserPromptSubmit", "session_id": "abc-123"}, 1)
+    assert (_marker(sessions)["turn_started"], _marker(sessions)["tools"]) == (201.0, 0)
+
+
+def test_turn_counters_start_now_without_history():
+    assert hook.turn_counters({}, "PreToolUse", 50.0) == (50.0, 1)
+    assert hook.turn_counters({"turn_started": "x", "tools": 3}, "Stop", 50.0) == (50.0, 0)
+    assert hook.turn_counters({"turn_started": 10, "tools": 3}, "PreToolUse", 50.0) == (10.0, 4)
 
 
 def test_dead_cached_owner_is_looked_up_again(sessions, monkeypatch):

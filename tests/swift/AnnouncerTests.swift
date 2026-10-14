@@ -155,6 +155,56 @@ enum AnnouncerTests {
             _ = step(&a, [s("1", .idle, nil as String?)], 18)
             check(a.project("1") == "app", "project remembered when the marker has none")
         }
+        do {
+            // A command left running after the turn holds as background; finished waits for it.
+            var a = Announcer()
+            _ = step(&a, [s("1", .working)], 0)
+            check(step(&a, [s("1", .background)], 3).isEmpty, "background is silent")
+            check(step(&a, [s("1", .background)], 3 + settle * 3).isEmpty, "no finished while the command runs")
+            _ = step(&a, [s("1", .idle)], 100)
+            check(step(&a, [s("1", .idle)], 100 + settle) == [.finished(project: "app")], "finished once the command ends")
+        }
+        do {
+            // The finished notice carries the turn length and tool calls.
+            var a = Announcer()
+            let start = t0.addingTimeInterval(-600)
+            _ = step(&a, [Session(id: "1", project: "app", activity: .working, updatedAt: t0, turnStarted: start, tools: 12)], 0)
+            _ = step(&a, [Session(id: "1", project: "app", activity: .idle, updatedAt: t0.addingTimeInterval(5),
+                                  turnStarted: start, tools: 12)], 6)
+            let out = step(&a, [Session(id: "1", project: "app", activity: .idle, updatedAt: t0.addingTimeInterval(5),
+                                        turnStarted: start, tools: 12)], 6 + settle)
+            check(out == [.finished(project: "app", duration: 605, tools: 12)], "duration from prompt to Stop")
+        }
+        do {
+            // Format.
+            check(Format.finished(project: "vigil", duration: 14 * 60, tools: 38) == "Done in vigil, 14 min, 38 commands.", "full text")
+            check(Format.finished(project: nil, duration: nil, tools: 1) == "A session is done, 1 command.", "no project")
+            check(Format.length(45) == "45 s" && Format.length(125 * 60) == "2 h 5 min", "lengths")
+        }
+        do {
+            // Quiet hours wrap past midnight.
+            check(VigilSettings.isQuiet(hour: 23, from: 22, to: 7), "23 in 22 to 7")
+            check(VigilSettings.isQuiet(hour: 3, from: 22, to: 7), "3 in 22 to 7")
+            check(!VigilSettings.isQuiet(hour: 7, from: 22, to: 7), "7 not in 22 to 7")
+            check(VigilSettings.isQuiet(hour: 13, from: 12, to: 14), "13 in 12 to 14")
+            check(!VigilSettings.isQuiet(hour: 5, from: 5, to: 5), "same hour means off")
+        }
+        do {
+            // Daily log: append, summarize, prune.
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vigil-log-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let log = DailyLog(folder: folder)
+            let now = Date()
+            log.append(.init(project: "a", finishedAt: now, duration: 120, tools: 3))
+            log.append(.init(project: "b", finishedAt: now, duration: 600, tools: 9))
+            log.append(.init(project: "c", finishedAt: now, duration: nil, tools: nil))
+            let today = log.summary(day: now)
+            check(today.tasks == 3 && today.working == 720 && today.longest?.project == "b", "summary")
+            let old = Calendar.current.date(byAdding: .day, value: -40, to: now)!
+            log.append(.init(project: "old", finishedAt: old, duration: 1, tools: 1))
+            log.prune(now: now)
+            check(log.read(day: old).isEmpty && log.read(day: now).count == 3, "prune keeps today, drops old")
+        }
         print(failures == 0 ? "Announcer tests passed" : "\(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

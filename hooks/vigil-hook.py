@@ -8,8 +8,9 @@ One script for every event. It writes one small marker file per Claude Code sess
   Notification: idle prompt, Stop                  -> state "idle"
   SessionEnd                                       -> marker removed
 
-The marker holds only the state, the pid of the owning `claude` process, a timestamp,
-and the name of the session's project folder (the last part of its working directory).
+The marker holds only the state, the pid of the owning `claude` process, a timestamp, when
+the current turn started and how many tool calls it made, and the name of the session's
+project folder (the last part of its working directory).
 Nothing else from the hook payload (prompt text, tool input or output, messages) is ever
 stored. Vigil treats a marker as working only while that pid is a live `claude` process and
 the marker is recent, so a crashed, killed or interrupted session cannot keep the Mac awake.
@@ -125,16 +126,37 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def cached_pid(path: Path) -> int | None:
+def read_previous(path: Path) -> dict:
+    """The marker an earlier event of this session wrote, or an empty dict."""
+    try:
+        previous = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return previous if isinstance(previous, dict) else {}
+
+
+def cached_pid(previous: dict) -> int | None:
     """The owner recorded by an earlier event of this session, while it still runs.
 
     PreToolUse fires on every tool call; this skips the process walk on all but the first.
     """
-    try:
-        pid = json.loads(path.read_text()).get("claude_pid")
-    except (OSError, ValueError, AttributeError):
-        return None
+    pid = previous.get("claude_pid")
     return pid if isinstance(pid, int) and pid > 1 and pid_alive(pid) else None
+
+
+def turn_counters(previous: dict, event: str, now: float) -> tuple[float, int]:
+    """(turn start, tool calls this turn), for "Done in vigil, 14 min, 38 commands".
+
+    A prompt starts a new turn; each PreToolUse counts one call. A turn the marker does not
+    know about yet (the hook was installed mid-turn) starts now.
+    """
+    started = previous.get("turn_started")
+    tools = previous.get("tools")
+    if event == "UserPromptSubmit" or not isinstance(started, (int, float)) or not isinstance(tools, int):
+        started, tools = now, 0
+    if event == "PreToolUse":
+        tools += 1
+    return float(started), tools
 
 
 def project_name(payload: dict) -> str | None:
@@ -146,16 +168,13 @@ def project_name(payload: dict) -> str | None:
     return name[:_MAX_PROJECT_NAME] or None
 
 
-def write_marker(path: Path, state: str, claude_pid: int, project: str | None) -> None:
+def write_marker(path: Path, record: dict) -> None:
     # Only this user may read which projects are open; tighten a folder made before that rule.
     SESSIONS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         os.chmod(SESSIONS_DIR, 0o700)
     except OSError:
         pass  # never let the tightening stop the marker write
-    record: dict = {"state": state, "claude_pid": claude_pid, "updated_at": time.time()}
-    if project:
-        record["project"] = project
     data = json.dumps(record)
     fd, tmp = tempfile.mkstemp(dir=SESSIONS_DIR, prefix=".tmp-")
     try:
@@ -197,11 +216,19 @@ def handle(payload: dict, start_pid: int) -> None:
     if state is None:
         return
 
-    claude_pid = cached_pid(path) or find_claude_pid(start_pid)
+    previous = read_previous(path)
+    claude_pid = cached_pid(previous) or find_claude_pid(start_pid)
     if claude_pid is None:
         # No live owner to tie the marker to; Vigil would discard it anyway.
         return
-    write_marker(path, state, claude_pid, project_name(payload))
+    now = time.time()
+    started, tools = turn_counters(previous, event, now)
+    record: dict = {"state": state, "claude_pid": claude_pid, "updated_at": now,
+                    "turn_started": started, "tools": tools}
+    project = project_name(payload)
+    if project:
+        record["project"] = project
+    write_marker(path, record)
 
 
 def main() -> int:

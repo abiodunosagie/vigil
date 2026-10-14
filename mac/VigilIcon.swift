@@ -1,10 +1,8 @@
-/// The SF Symbol for each phase, shared by the menu bar icon and the panel header.
+/// The SF Symbol for Vigil's state, shared by the menu bar icon and the panel header.
 enum VigilIcon {
-    static func symbol(for phase: SessionWatcher.Phase) -> String {
-        switch phase {
-        case .working: "cup.and.saucer.fill"
-        case .finishing: "cup.and.saucer"
-        case .idle: "moon.zzz"
-        }
+    static func symbol(holding: Bool, phase: SessionWatcher.Phase) -> String {
+        guard holding else { return "moon.zzz" }
+        if case .working = phase { return "cup.and.saucer.fill" }
+        return "cup.and.saucer"
     }
 }

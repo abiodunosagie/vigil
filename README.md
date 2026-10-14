@@ -30,19 +30,51 @@ every session is done.
 
 - **Claude finished:** a session that did work has stayed idle for 20 seconds (so a Stop hook
   sending Claude straight back to work is not reported), or a working session ended on its
-  own. Closing the terminal or killing `claude` mid task is not reported as finished.
+  own. The text gives the task length and tool calls: "Done in vigil, 14 min, 38 commands."
+  Closing the terminal or killing `claude` mid task is not reported as finished. Click it to
+  bring that session's Terminal tab to the front (Terminal.app; macOS asks once to allow it).
 - **Claude needs you:** a session asked a permission question or another question.
-- **All Claude sessions are done:** the hold is released and the Mac sleeps normally again.
+- **All Claude sessions are done:** the session hold is released.
+- **Battery low, Vigil let go:** on battery below your floor, every hold is dropped.
 
-macOS asks once whether Vigil may show notifications; click Allow.
+Each kind has its own sound (Settings). Mute turns all sounds off; quiet hours turn them off
+for a time range while banners still show. macOS asks once whether Vigil may show
+notifications; click Allow.
+
+## More holds and switches
+
+- **Running commands:** a Bash command Claude started in the background keeps the Mac held
+  after Claude's turn ends ("running a command" in the panel), until it exits.
+- **Grace time:** stay awake 1, 5, 15 or 30 minutes after the last session finishes.
+- **Keep screen on:** also stops the screen dimming and locking while held.
+- **Manual hold:** keep the Mac awake for 30 minutes to 4 hours, or until turned off, with
+  no Claude session.
+- **Battery guard:** on battery below a floor you set (20% by default), every hold lets go.
+- **Lid closed:** optional root helper (`lid/vigil-lid.sh`), installed from Settings with your
+  admin password. While held and switched on, the Mac keeps running with the lid shut. It
+  only reads the age of a heartbeat file Vigil refreshes; if Vigil quits, crashes or stops
+  holding, normal lid sleep is back within about 45 seconds. Below 10% on battery it always
+  lets the Mac sleep. Remove it from Settings.
+- **Phone alerts:** the same alerts through ntfy (free app, no account). Settings shows a long
+  random topic; subscribe to it in the ntfy app. Anyone who knows the topic can read the
+  alerts, so keep it private; "New topic" replaces it. Only the alert title and text are sent.
+  Pushover is a paid alternative if you ever prefer one.
+- **Today:** the panel shows today's finished tasks, total working time and the longest task,
+  from a daily log in `~/Library/Application Support/Vigil/log/` kept 30 days.
+
+## Desktop widget
+
+Small and medium sizes: whether the Mac is held and for how long, the open sessions with their
+state, and today's total. Add it from the widget gallery (right click the desktop, Edit
+Widgets, search Vigil). The app refreshes it on every change.
 
 Check the hold any time with `pmset -g assertions | grep Vigil`.
 
 ## Menu bar
 
-- Click the icon: status, every open Claude session with its project and whether it is
-  working, waiting on you or idle, how long the Mac has been held, Launch at login, and Quit.
-- Right click or Control click: Open Vigil and Quit Vigil.
+- Click the icon: status, every open Claude session with its project and state, today's
+  total, the manual hold, Keep screen on, Mute, Launch at login, Settings and Quit.
+- Right click or Control click: Open Vigil, Settings and Quit Vigil.
 - Icon: a filled cup while Claude works, an outline cup during the 60 second grace, a moon when
   the Mac can sleep. With more than one session working, the count shows next to it.
 
@@ -68,11 +100,9 @@ Remove the hook: `python3 hooks/install_hooks.py --remove`.
 
 ## Limits
 
-- Closing the lid still sleeps the Mac. Preventing that needs root (`pmset disablesleep`),
-  which Vigil does not do.
-- A Bash command Claude starts in the background keeps running after Claude's turn ends. Vigil
-  sees the session as finished at that point, so after the grace period the Mac may sleep
-  before that background command completes.
+- Closing the lid sleeps the Mac unless the lid helper is installed and switched on.
+- Jumping to a session covers Terminal.app only, not iTerm or editors.
+- The widget's placement is yours: macOS has no way for an app to put it on the desktop.
 
 ## Tests
 

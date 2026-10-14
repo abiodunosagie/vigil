@@ -6,6 +6,8 @@ enum Activity: Equatable {
     case working
     /// Asked the user something mid-task (a permission prompt or a question).
     case waiting
+    /// The turn ended, but a command Claude started is still running in the background.
+    case background
     /// Finished, or sitting at the prompt.
     case idle
     /// Said working or waiting, but has not been heard from for too long (an interrupted
@@ -14,15 +16,16 @@ enum Activity: Equatable {
     case stale
 
     /// Holds the Mac awake.
-    var isActive: Bool { self == .working || self == .waiting }
+    var isActive: Bool { self == .working || self == .waiting || self == .background }
 
     /// Panel order: working first, then waiting, then the rest.
     var rank: Int {
         switch self {
         case .working: 0
         case .waiting: 1
-        case .idle: 2
-        case .stale: 3
+        case .background: 2
+        case .idle: 3
+        case .stale: 4
         }
     }
 }
@@ -33,11 +36,17 @@ struct Session: Equatable {
     let activity: Activity
     /// When the hook last wrote this session's marker.
     let updatedAt: Date
+    /// When the current turn began, and how many tool calls it has made.
+    var turnStarted: Date? = nil
+    var tools: Int? = nil
+    /// The session's `claude` process, for jumping to its Terminal tab.
+    var pid: Int32? = nil
 }
 
 /// Something worth a notification.
 enum Announcement: Equatable {
-    case finished(project: String?)
+    /// `duration` runs from the prompt to the moment the session went idle.
+    case finished(project: String?, duration: TimeInterval? = nil, tools: Int? = nil)
     case waiting(project: String?)
 }
 
@@ -60,6 +69,16 @@ struct Announcer {
         var project: String?
         /// Did work since the last "finished".
         var owesFinished: Bool
+        var turnStarted: Date?
+        var tools: Int?
+        /// When the session last went idle, for the task length.
+        var idleSince: Date?
+
+        func finished() -> Announcement {
+            var duration: TimeInterval?
+            if let turnStarted, let idleSince { duration = max(0, idleSince.timeIntervalSince(turnStarted)) }
+            return .finished(project: project, duration: duration, tools: tools)
+        }
     }
 
     static let settle: TimeInterval = 20
@@ -89,11 +108,15 @@ struct Announcer {
                 // First sight: the marker's own time is the best guess of when this began.
                 tracks[session.id] = Track(activity: session.activity, changedAtUptime: uptime,
                                            changedAt: min(session.updatedAt, now), project: session.project,
-                                           owesFinished: session.activity != .idle)
+                                           owesFinished: session.activity != .idle,
+                                           turnStarted: session.turnStarted, tools: session.tools,
+                                           idleSince: session.activity == .idle ? session.updatedAt : nil)
                 if seeded, session.activity == .waiting { out.append(.waiting(project: session.project)) }
                 continue
             }
             if let project = session.project { track.project = project }
+            if let started = session.turnStarted { track.turnStarted = started }
+            if let tools = session.tools { track.tools = tools }
             if track.activity != session.activity {
                 track.activity = session.activity
                 track.changedAtUptime = uptime
@@ -103,19 +126,27 @@ struct Announcer {
                 case .waiting:
                     track.owesFinished = true
                     out.append(.waiting(project: track.project))
-                case .idle, .stale: break
+                case .idle:
+                    // The marker's time is when the turn ended (a background command may have
+                    // run on after it; the task length counts Claude's own turn).
+                    track.idleSince = min(session.updatedAt, now)
+                case .background, .stale: break
                 }
             }
             if track.activity == .idle, track.owesFinished, uptime - track.changedAtUptime >= Self.settle {
                 track.owesFinished = false
-                out.append(.finished(project: track.project))
+                out.append(track.finished())
             }
             tracks[session.id] = track
         }
         for (id, track) in tracks where !seen.contains(id) {
             let ended = !abandoned.contains(id) && track.owesFinished
                 && track.activity != .waiting && track.activity != .stale
-            if ended { out.append(.finished(project: track.project)) }
+            if ended {
+                var last = track
+                if last.idleSince == nil { last.idleSince = now }
+                out.append(last.finished())
+            }
             tracks[id] = nil
         }
         seeded = true

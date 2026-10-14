@@ -21,8 +21,9 @@ final class MenuPanel: NSObject, NSWindowDelegate {
 
     private let login = LoginSwitch()
 
-    init(watcher: SessionWatcher) {
-        host = NSHostingView(rootView: PanelView(watcher: watcher, login: login))
+    init(watcher: SessionWatcher, openSettings: @escaping () -> Void) {
+        host = NSHostingView(rootView: PanelView(watcher: watcher, settings: watcher.settings, login: login,
+                                                 openSettings: openSettings))
         panel = KeyablePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
         panel.isFloatingPanel = true
