@@ -89,7 +89,7 @@ struct Announcer {
                 // First sight: the marker's own time is the best guess of when this began.
                 tracks[session.id] = Track(activity: session.activity, changedAtUptime: uptime,
                                            changedAt: min(session.updatedAt, now), project: session.project,
-                                           owesFinished: session.activity.isActive)
+                                           owesFinished: session.activity != .idle)
                 if seeded, session.activity == .waiting { out.append(.waiting(project: session.project)) }
                 continue
             }

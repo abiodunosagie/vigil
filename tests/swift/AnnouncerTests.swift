@@ -100,6 +100,13 @@ enum AnnouncerTests {
             check(step(&a, [s("1", .idle)], 6 + settle) == [.finished(project: "app")], "stale then idle finishes")
         }
         do {
+            // First seen quiet (after a Vigil restart), then a real Stop: that is a finish.
+            var a = Announcer()
+            _ = step(&a, [s("1", .stale)], 0)
+            _ = step(&a, [s("1", .idle)], 3)
+            check(step(&a, [s("1", .idle)], 3 + settle) == [.finished(project: "app")], "first seen stale then idle")
+        }
+        do {
             // Stale then back to work: owes a finish again.
             var a = Announcer()
             _ = step(&a, [s("1", .stale)], 0)

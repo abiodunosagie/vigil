@@ -189,7 +189,13 @@ final class SessionWatcher: ObservableObject {
             let id = file.deletingPathExtension().lastPathComponent
             let age = values?.contentModificationDate.map { Date().timeIntervalSince($0) } ?? 0
             guard var marker = Marker.read(file) else {
-                if age > Marker.staleAfter { try? fm.removeItem(at: file) } else { result.unreadable.insert(id) }
+                if age > Marker.staleAfter {
+                    // Dropped without a "finished": nothing says the work ended.
+                    try? fm.removeItem(at: file)
+                    result.abandoned.insert(id)
+                } else {
+                    result.unreadable.insert(id)
+                }
                 continue
             }
             if !marker.ownerAlive {
