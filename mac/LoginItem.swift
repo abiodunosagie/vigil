@@ -1,8 +1,11 @@
+import Combine
 import Foundation
 
-/// Starts Vigil at login through a user LaunchAgent.
+/// Starts Vigil at login through a user LaunchAgent, the same way the owner's other menu bar
+/// apps do. Unlike SMAppService, it needs no approval in System Settings for an ad hoc
+/// signed app built on this Mac.
 enum LoginItem {
-    static let label = "com.abiodun.vigil"
+    static let label = AppInfo.bundleID
 
     enum Failure: Error { case noExecutable }
 
@@ -28,5 +31,28 @@ enum LoginItem {
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try FileManager.default.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: plistURL, options: .atomic)
+    }
+}
+
+/// The panel's Launch at login switch. Re-read each time the panel opens, so a change made
+/// elsewhere shows, and a failed change reports instead of silently flipping back.
+@MainActor
+final class LoginSwitch: ObservableObject {
+    @Published private(set) var isOn = LoginItem.isEnabled
+    @Published private(set) var error: String?
+
+    func reload() {
+        isOn = LoginItem.isEnabled
+        error = nil
+    }
+
+    func set(_ enabled: Bool) {
+        do {
+            try LoginItem.set(enabled: enabled)
+            error = nil
+        } catch {
+            self.error = "Could not change the login setting."
+        }
+        isOn = LoginItem.isEnabled
     }
 }

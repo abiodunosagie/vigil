@@ -5,6 +5,7 @@ set -eu
 PROJECT="$(cd "$(dirname "$0")" && pwd)"
 APP="$HOME/Applications/Vigil.app"
 BUILD="$PROJECT/build"
+# Must match DEFAULT_COMMAND in hooks/install_hooks.py.
 HOOK="$HOME/.claude/hooks/vigil-hook.py"
 mkdir -p "$BUILD"
 
@@ -18,6 +19,7 @@ rm -rf "$BUILD/Vigil.iconset"
 xcrun swift "$PROJECT/tools/make-icon.swift" "$BUILD/Vigil.iconset"
 iconutil -c icns "$BUILD/Vigil.iconset" -o "$BUILD/Vigil.icns"
 
+# Quit the installed copy and give it a moment to exit before its bundle is replaced.
 pkill -x Vigil 2>/dev/null || true
 sleep 1
 
@@ -54,5 +56,5 @@ echo "Installing the Claude Code hook..."
 mkdir -p "$(dirname "$HOOK")"
 cp "$PROJECT/hooks/vigil-hook.py" "$HOOK"
 chmod 755 "$HOOK"
-/usr/bin/python3 "$PROJECT/hooks/install_hooks.py"
+python3 "$PROJECT/hooks/install_hooks.py"
 echo "Done. New Claude Code sessions report to Vigil; sessions already open need a restart."

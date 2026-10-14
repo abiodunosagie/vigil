@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // One Vigil at a time: a second copy just leaves.
         let me = NSRunningApplication.current
-        if NSRunningApplication.runningApplications(withBundleIdentifier: LoginItem.label)
+        if NSRunningApplication.runningApplications(withBundleIdentifier: AppInfo.bundleID)
             .contains(where: { $0.processIdentifier != me.processIdentifier }) {
             NSApp.terminate(nil)
             return
@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setUpLaunchAtLoginOnce() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.loginSetUpKey) else { return }
+        // On failure the flag stays unset, so the next launch tries again.
         if (try? LoginItem.set(enabled: true)) != nil {
             defaults.set(true, forKey: Self.loginSetUpKey)
         }

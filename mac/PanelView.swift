@@ -4,8 +4,7 @@ import SwiftUI
 /// The panel under the menu bar icon: what Vigil is doing, launch at login, and Quit.
 struct PanelView: View {
     @ObservedObject var watcher: SessionWatcher
-    @State private var launchAtLogin = LoginItem.isEnabled
-    @State private var loginError: String?
+    @ObservedObject var login: LoginSwitch
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -13,19 +12,10 @@ struct PanelView: View {
             Divider()
             details
             Divider()
-            Toggle("Launch at login", isOn: $launchAtLogin)
+            Toggle("Launch at login", isOn: Binding(get: { login.isOn }, set: { login.set($0) }))
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .onChange(of: launchAtLogin) { _, enabled in
-                    do {
-                        try LoginItem.set(enabled: enabled)
-                        loginError = nil
-                    } catch {
-                        loginError = "Could not change the login setting."
-                        launchAtLogin = LoginItem.isEnabled
-                    }
-                }
-            if let loginError {
+            if let loginError = login.error {
                 Text(loginError).font(.caption).foregroundStyle(.red)
             }
             Button(role: .destructive) {
@@ -58,6 +48,7 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 6) {
             row("Claude sessions open", "\(watcher.openCount)")
             row("Working now", "\(watcher.workingCount)")
+            // Only this row ticks every second.
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 row("Keeping awake for", watcher.holdingSince.map { Self.duration(context.date.timeIntervalSince($0)) } ?? "Not holding")
             }
@@ -98,7 +89,7 @@ struct PanelView: View {
     private var accent: Color {
         switch watcher.phase {
         case .working: .orange
-        case .finishing: .yellow
+        case .finishing: .orange.opacity(0.7)
         case .idle: .secondary
         }
     }
@@ -107,15 +98,5 @@ struct PanelView: View {
         let total = max(0, Int(seconds))
         let h = total / 3600, m = total / 60 % 60, s = total % 60
         return h > 0 ? "\(h)h \(m)m" : m > 0 ? "\(m)m \(s)s" : "\(s)s"
-    }
-}
-
-enum VigilIcon {
-    static func symbol(for phase: SessionWatcher.Phase) -> String {
-        switch phase {
-        case .working: "cup.and.saucer.fill"
-        case .finishing: "cup.and.saucer"
-        case .idle: "moon.zzz"
-        }
     }
 }

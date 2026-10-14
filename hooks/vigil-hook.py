@@ -3,14 +3,14 @@
 
 One script for every event. It writes one small marker file per Claude Code session:
 
-  UserPromptSubmit, PreToolUse  -> state "busy"
-  Stop                          -> state "idle"
-  SessionEnd                    -> marker removed
+  UserPromptSubmit, PreToolUse, PostToolUse  -> state "busy"
+  Stop, Notification (waiting on you)        -> state "idle"
+  SessionEnd                                 -> marker removed
 
 The marker holds only the state, the pid of the owning `claude` process and a timestamp.
 Nothing else from the hook payload (prompt text, tool input) is ever stored. Vigil treats a
-marker as working only while that pid is alive, so a crashed or killed session cannot keep
-the Mac awake.
+marker as working only while that pid is a live `claude` process and the marker is recent,
+so a crashed, killed or interrupted session cannot keep the Mac awake.
 
 The hook never blocks Claude: it prints nothing and always exits 0.
 """
@@ -28,14 +28,23 @@ from pathlib import Path
 
 SESSIONS_DIR = Path.home() / "Library" / "Application Support" / "Vigil" / "sessions"
 
-BUSY_EVENTS = {"UserPromptSubmit", "PreToolUse"}
-IDLE_EVENTS = {"Stop"}
-END_EVENTS = {"SessionEnd"}
+BUSY_EVENTS = {"UserPromptSubmit", "PreToolUse", "PostToolUse"}
+# A Notification means Claude waits on the user (a permission prompt, an idle prompt, a
+# question); nothing moves until they answer, so the Mac may sleep. A sign-in success
+# notification is the exception: work carries on.
+NOTIFICATION = "Notification"
+NOTIFICATIONS_STILL_WORKING = {"auth_success"}
+STOP = "Stop"
+SESSION_END = "SessionEnd"
 
 # Session ids are UUIDs; anything else is reduced to a safe file name.
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 # Hooks run through a shell or two below `claude`; never walk further than this.
 _MAX_HOPS = 12
+# The whole walk must finish well inside the hook timeout the installer sets (5 s).
+_WALK_DEADLINE_SECONDS = 1.5
+# Payloads are small; never read an unbounded stdin.
+_MAX_STDIN = 1 << 20
 
 
 def marker_path(session_id: str) -> Path | None:
@@ -43,38 +52,50 @@ def marker_path(session_id: str) -> Path | None:
     return SESSIONS_DIR / f"{name}.json" if name else None
 
 
-def _parent_and_name(pid: int) -> tuple[int, str, str] | None:
-    """(parent pid, command name, full command line) of `pid`, or None if it is gone."""
+def _ps(pid: int, columns: tuple[str, ...], timeout: float) -> str:
+    # "name=" on every column suppresses the header line.
+    return subprocess.run(
+        ["ps", "-o", ",".join(f"{c}=" for c in columns), "-p", str(pid)],
+        capture_output=True, text=True, timeout=max(timeout, 0.05), check=False,
+    ).stdout.strip()
+
+
+def process_info(pid: int, timeout: float) -> tuple[int, str, str] | None:
+    """(parent pid, command name, full command line) of `pid`, or None if it is gone.
+
+    The command line is only fetched for `node`, the one case that needs it.
+    """
     try:
-        out = subprocess.run(
-            ["ps", "-o", "ppid=,comm=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=2, check=False,
-        ).stdout.strip()
-        args = subprocess.run(
-            ["ps", "-o", "args=", "-p", str(pid)],
-            capture_output=True, text=True, timeout=2, check=False,
-        ).stdout.strip()
+        parts = _ps(pid, ("ppid", "comm"), timeout).split(None, 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            return None
+        command = parts[1]
+        args = _ps(pid, ("args",), timeout) if os.path.basename(command) == "node" else command
     except (OSError, subprocess.SubprocessError):
         return None
-    parts = out.split(None, 1)
-    if len(parts) != 2 or not parts[0].isdigit():
-        return None
-    return int(parts[0]), parts[1], args
+    return int(parts[0]), command, args
 
 
 def is_claude(command: str, args: str) -> bool:
-    """The native `claude` binary, or a Node install running the Claude Code CLI."""
+    """The native `claude` binary, or a Node install running the Claude Code CLI.
+
+    For Node, an npm install runs `.../@anthropic-ai/claude-code/cli.js` and a global shim
+    runs `.../bin/claude`. A false match only ties the marker to the wrong long-lived parent,
+    which then still dies with the terminal, so a loose check is acceptable here.
+    """
     if os.path.basename(command) == "claude":
         return True
     return os.path.basename(command) == "node" and ("claude-code" in args or "/claude " in f"{args} ")
 
 
 def find_claude_pid(start: int) -> int | None:
+    deadline = time.monotonic() + _WALK_DEADLINE_SECONDS
     pid = start
     for _ in range(_MAX_HOPS):
-        if pid <= 1:
+        remaining = deadline - time.monotonic()
+        if pid <= 1 or remaining <= 0:
             return None
-        info = _parent_and_name(pid)
+        info = process_info(pid, remaining)
         if info is None:
             return None
         parent, command, args = info
@@ -113,15 +134,23 @@ def write_marker(path: Path, state: str, claude_pid: int) -> None:
     data = json.dumps({"state": state, "claude_pid": claude_pid, "updated_at": time.time()})
     fd, tmp = tempfile.mkstemp(dir=SESSIONS_DIR, prefix=".tmp-")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(data)
         os.replace(tmp, path)
-    except OSError:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def state_for(payload: dict, event: str) -> str | None:
+    if event in BUSY_EVENTS:
+        return "busy"
+    if event == STOP:
+        return "idle"
+    if event == NOTIFICATION:
+        kind = payload.get("notification_type")
+        return "busy" if kind in NOTIFICATIONS_STILL_WORKING else "idle"
+    return None
 
 
 def handle(payload: dict, start_pid: int) -> None:
@@ -133,14 +162,11 @@ def handle(payload: dict, start_pid: int) -> None:
     if path is None:
         return
 
-    if event in END_EVENTS:
+    if event == SESSION_END:
         path.unlink(missing_ok=True)
         return
-    if event in BUSY_EVENTS:
-        state = "busy"
-    elif event in IDLE_EVENTS:
-        state = "idle"
-    else:
+    state = state_for(payload, event)
+    if state is None:
         return
 
     claude_pid = cached_pid(path) or find_claude_pid(start_pid)
@@ -152,7 +178,7 @@ def handle(payload: dict, start_pid: int) -> None:
 
 def main() -> int:
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = json.loads(sys.stdin.read(_MAX_STDIN))
         if isinstance(payload, dict):
             handle(payload, os.getppid())
     except Exception:  # noqa: BLE001 - a hook failure must never reach Claude

@@ -1,11 +1,12 @@
 import Combine
+import Darwin
 import Foundation
 
 /// Reads the markers the Claude Code hook writes and decides whether to keep the Mac awake.
 ///
-/// A session counts as working while its marker says "busy" and its `claude` process is
-/// alive. After the last one stops, the Mac is held a little longer: a Stop hook can send
-/// Claude straight back to work, and that should not let the Mac doze off in between.
+/// A session counts as working while its marker says "busy", the marker is recent, and its
+/// `claude` process is alive. After the last one stops, the Mac is held a little longer: a
+/// Stop hook can send Claude straight back to work, and that should not let the Mac doze off.
 @MainActor
 final class SessionWatcher: ObservableObject {
     enum Phase: Equatable {
@@ -32,7 +33,9 @@ final class SessionWatcher: ObservableObject {
     private static let interval: TimeInterval = 3
 
     private let guardian = SleepGuard()
-    private var lastWorking: Date?
+    /// Uptime of the last poll that saw a working session. Uptime, not the wall clock, so a
+    /// clock change cannot stretch or skip the grace period.
+    private var lastWorkingUptime: TimeInterval?
     private var timer: Timer?
 
     func start() {
@@ -52,28 +55,34 @@ final class SessionWatcher: ObservableObject {
         guardian.release()
     }
 
-    func refresh(now: Date = Date()) {
-        let (working, open) = Self.scan()
-        workingCount = working
-        openCount = open
-
-        if working > 0 {
-            lastWorking = now
-            phase = .working
-        } else if let last = lastWorking, now.timeIntervalSince(last) < Self.grace {
-            phase = .finishing(until: last.addingTimeInterval(Self.grace))
+    func refresh() {
+        let counts = Self.scan()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let next: Phase
+        if counts.working > 0 {
+            lastWorkingUptime = uptime
+            next = .working
+        } else if let last = lastWorkingUptime, uptime - last < Self.grace {
+            // Keep the end time fixed through the grace period instead of recomputing it.
+            if case .finishing = phase { next = phase } else {
+                next = .finishing(until: Date().addingTimeInterval(Self.grace - (uptime - last)))
+            }
         } else {
-            lastWorking = nil
-            phase = .idle
+            lastWorkingUptime = nil
+            next = .idle
         }
+        // Assign only on change: every @Published write redraws the icon and the panel.
+        if workingCount != counts.working { workingCount = counts.working }
+        if openCount != counts.open { openCount = counts.open }
+        if phase != next { phase = next }
         apply()
     }
 
     private func apply() {
         guard phase != .idle else {
             guardian.release()
-            holdingSince = nil
-            problem = nil
+            if holdingSince != nil { holdingSince = nil }
+            if problem != nil { problem = nil }
             return
         }
         let reason = workingCount > 0
@@ -81,27 +90,40 @@ final class SessionWatcher: ObservableObject {
             : "Vigil: Claude Code just finished"
         if guardian.hold(reason: reason) {
             if holdingSince == nil { holdingSince = Date() }
-            problem = nil
+            if problem != nil { problem = nil }
         } else {
-            holdingSince = nil
-            problem = "macOS refused to keep the Mac awake."
+            if holdingSince != nil { holdingSince = nil }
+            let message = "macOS refused to keep the Mac awake."
+            if problem != message { problem = message }
         }
     }
 
-    /// (working sessions, live sessions). Markers whose `claude` process is gone are deleted.
-    private static func scan() -> (Int, Int) {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+    /// Counts working and open sessions. Markers whose `claude` process is gone are deleted,
+    /// and so are temp files a hook left behind when it was killed mid-write.
+    private static func scan() -> (working: Int, open: Int) {
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+        let files = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
         var working = 0
         var open = 0
-        for file in files where file.pathExtension == "json" {
-            guard let marker = Marker.read(file) else { continue }
+        for file in files {
+            let values = try? file.resourceValues(forKeys: Set(keys))
+            // Only plain files: a FIFO named like a marker would block the read.
+            guard values?.isRegularFile == true else { continue }
+            if file.lastPathComponent.hasPrefix(".tmp-") {
+                if let modified = values?.contentModificationDate, Date().timeIntervalSince(modified) > 600 {
+                    try? fm.removeItem(at: file)
+                }
+                continue
+            }
+            guard file.pathExtension == "json", let marker = Marker.read(file) else { continue }
             guard marker.ownerAlive else {
-                try? FileManager.default.removeItem(at: file)
+                // Re-read first: a resumed session may have just rewritten this file.
+                if Marker.read(file)?.ownerAlive == false { try? fm.removeItem(at: file) }
                 continue
             }
             open += 1
-            if marker.state == "busy" { working += 1 }
+            if marker.isWorking() { working += 1 }
         }
         return (working, open)
     }
@@ -111,10 +133,17 @@ final class SessionWatcher: ObservableObject {
 struct Marker: Decodable {
     let state: String
     let claudePid: Int32
+    let updatedAt: TimeInterval
+
+    /// A busy marker not refreshed for this long is not trusted. Claude Code fires no hook
+    /// when the user interrupts a turn, and every tool call refreshes the marker, while a
+    /// foreground tool call is capped at 10 minutes.
+    static let staleAfter: TimeInterval = 20 * 60
 
     enum CodingKeys: String, CodingKey {
         case state
         case claudePid = "claude_pid"
+        case updatedAt = "updated_at"
     }
 
     static func read(_ url: URL) -> Marker? {
@@ -122,9 +151,23 @@ struct Marker: Decodable {
         return try? JSONDecoder().decode(Marker.self, from: data)
     }
 
-    /// kill with signal 0 only checks: EPERM still means the process exists.
+    func isWorking(now: Date = Date()) -> Bool {
+        state == "busy" && now.timeIntervalSince1970 - updatedAt < Self.staleAfter
+    }
+
+    /// The owner still runs and is still Claude Code, so a reused pid cannot hold the Mac
+    /// awake. Checked by executable path: Claude Code renames its process title to its
+    /// version ("2.1.299"), so the process name says nothing. The native install runs
+    /// `~/.local/share/claude/versions/<version>`; others run `claude` or `node`.
     var ownerAlive: Bool {
         guard claudePid > 1 else { return false }
-        return kill(claudePid, 0) == 0 || errno == EPERM
+        var buffer = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(claudePid, &buffer, UInt32(buffer.count)) > 0 else { return false }
+        return Self.isClaudeExecutable(String(cString: buffer))
+    }
+
+    static func isClaudeExecutable(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        return name == "claude" || name == "node" || path.contains("/claude/versions/") || path.contains("claude-code")
     }
 }

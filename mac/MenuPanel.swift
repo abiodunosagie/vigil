@@ -19,8 +19,10 @@ final class MenuPanel: NSObject, NSWindowDelegate {
     /// soon after a close is that same click.
     private static let reopenGuard: TimeInterval = 0.3
 
+    private let login = LoginSwitch()
+
     init(watcher: SessionWatcher) {
-        host = NSHostingView(rootView: PanelView(watcher: watcher))
+        host = NSHostingView(rootView: PanelView(watcher: watcher, login: login))
         panel = KeyablePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
         panel.isFloatingPanel = true
@@ -48,6 +50,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
             close()
         } else {
             anchorButton = button
+            login.reload()
             place()
             NSApp.activate()
             panel.makeKeyAndOrderFront(nil)
