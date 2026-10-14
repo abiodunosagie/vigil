@@ -149,7 +149,10 @@ def project_name(payload: dict) -> str | None:
 def write_marker(path: Path, state: str, claude_pid: int, project: str | None) -> None:
     # Only this user may read which projects are open; tighten a folder made before that rule.
     SESSIONS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(SESSIONS_DIR, 0o700)
+    try:
+        os.chmod(SESSIONS_DIR, 0o700)
+    except OSError:
+        pass  # never let the tightening stop the marker write
     record: dict = {"state": state, "claude_pid": claude_pid, "updated_at": time.time()}
     if project:
         record["project"] = project

@@ -24,7 +24,7 @@ every session is done.
   process has died are deleted, so a crashed or closed session does not keep the Mac awake.
 - Claude Code fires no hook when you interrupt a turn with Esc. Every tool call refreshes the
   marker, so a busy or waiting marker not refreshed for 45 minutes stops holding the Mac. Such a
-  session shows as "quiet" and is never reported as finished.
+  session shows as "quiet", and is reported as finished only if Claude later stops on its own.
 
 ## Notifications
 
