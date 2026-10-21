@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><title>Vigil</title>
+<path d="M58 98 H178 V128 A60 52 0 0 1 58 128 Z"/>
+<path fill-rule="evenodd" d="M160 128 A30 30 0 1 0 220 128 A30 30 0 1 0 160 128 Z M180 128 A12 12 0 1 0 204 128 A12 12 0 1 0 180 128 Z"/>
+<rect x="40" y="190" width="176" height="16" rx="8"/>
+<path fill="none" stroke="#000" stroke-width="11" stroke-linecap="round" d="M96 78 C86 66 106 58 96 44 M140 78 C130 66 150 58 140 44"/>
+</svg>

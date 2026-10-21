@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hook:
+    name: Hook tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: pip install pytest
+      - run: python3 -m pytest -q tests
+
+  app:
+    name: App tests and build
+    # GitHub's Xcode 27 runner: the same macOS 27 and Swift the app is built with.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Swift tests
+        run: tests/run-swift-tests.sh
+      - name: Build the app and the widget
+        run: |
+          mkdir -p build
+          printf 'enum LidScript {\n    static let base64 = "%s"\n}\n' "$(base64 < lid/vigil-lid.sh | tr -d '\n')" > build/LidScript.swift
+          xcrun swiftc -O -parse-as-library -target arm64-apple-macos15.0 -o build/Vigil mac/*.swift build/LidScript.swift \
+            -framework AppKit -framework SwiftUI -framework IOKit -framework UserNotifications -framework WidgetKit
+          xcrun swiftc -O -parse-as-library -application-extension -target arm64-apple-macos15.0 -o build/VigilWidget \
+            widget/VigilWidget.swift mac/WidgetSnapshot.swift mac/Announcer.swift mac/ActivityStyle.swift mac/Format.swift \
+            -framework SwiftUI -framework WidgetKit -Xlinker -e -Xlinker _NSExtensionMain
+      - name: Draw the icon
+        run: xcrun swift tools/make-icon.swift build/Vigil.iconset && iconutil -c icns build/Vigil.iconset -o build/Vigil.icns

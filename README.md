@@ -1,8 +1,16 @@
-# Vigil
+<img src="brand/banner.svg" alt="Vigil: keeps your Mac awake while Claude Code works" width="100%">
+
+[![CI](https://github.com/abiodunosagie/vigil/actions/workflows/ci.yml/badge.svg)](https://github.com/abiodunosagie/vigil/actions/workflows/ci.yml)
 
 A macOS menu bar app that keeps your Mac awake while any Claude Code session is on a task,
 tells you when Claude finishes or needs you, and lets the Mac sleep on its usual schedule once
 every session is done.
+
+Start a long task, walk away, and the Mac won't fall asleep halfway through it. When Claude is
+done (or stuck on a question), you get a notification on the Mac, and on your phone if you
+want. When nothing is running any more, the Mac goes back to its own sleep settings.
+
+<img src="docs/screenshots/panel.png" width="320" alt="Vigil's menu bar panel: keeping the Mac awake while a Claude session works, today's total, and the hold, screen and sound switches">
 
 ## How it works
 
@@ -113,5 +121,15 @@ Remove the hook: `python3 hooks/install_hooks.py --remove`.
 python3 -m pytest tests
 tests/run-swift-tests.sh
 ```
+
+CI runs both, and builds the app and the widget, on every push.
+
+## Brand
+
+The cup is Vigil's own drawing (`brand/vigil-mark.svg`); the app icon is drawn from
+`brand/vigil-app-icon.svg` by `tools/make-icon.swift`. The banner comes from `brand/generate.py`,
+with the words in Schibsted Grotesk (SIL Open Font License 1.1, `brand/fonts/OFL.txt`).
+
+Vigil is not made by or affiliated with Anthropic. Claude and Claude Code are Anthropic's names.
 
 MIT licensed.
