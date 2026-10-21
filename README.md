@@ -69,7 +69,6 @@ notifications; click Allow.
 - **Phone alerts:** the same alerts through ntfy (free app, no account). Settings shows a long
   random topic; subscribe to it in the ntfy app. Anyone who knows the topic can read the
   alerts, so keep it private; "New topic" replaces it. Only the alert title and text are sent.
-  Pushover is a paid alternative if you ever prefer one.
 - **Today:** the panel shows today's finished tasks, total working time and the longest task,
   from a daily log in `~/Library/Application Support/Vigil/log/` kept 30 days.
 
@@ -126,9 +125,10 @@ CI runs both, and builds the app and the widget, on every push.
 
 ## Brand
 
-The cup is Vigil's own drawing (`brand/vigil-mark.svg`); the app icon is drawn from
-`brand/vigil-app-icon.svg` by `tools/make-icon.swift`. The banner comes from `brand/generate.py`,
-with the words in Schibsted Grotesk (SIL Open Font License 1.1, `brand/fonts/OFL.txt`).
+The cup in the app icon and the banner is Vigil's own drawing. `brand/generate.py` makes the
+mark, the app icon master and the banner; `tools/make-icon.swift` draws the icon set from the
+master. The menu bar and the panel use Apple's SF Symbols, as any Mac app may. The words are
+Schibsted Grotesk (SIL Open Font License 1.1, `brand/fonts/OFL.txt`).
 
 Vigil is not made by or affiliated with Anthropic. Claude and Claude Code are Anthropic's names.
 

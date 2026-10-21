@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Generates Vigil's README banner from the cup mark (brand/vigil-mark.svg geometry).
+"""Generates Vigil's brand files from one cup drawing: the mark, the app icon master and the
+README banner.
 
 The words are Schibsted Grotesk, outlined so no font is needed (fonts/, SIL Open Font License 1.1).
 
   python3 brand/generate.py
-Needs fontTools (pip install fonttools brotli). Writes brand/banner.svg and banner-static.svg.
+Needs fontTools (pip install fonttools brotli). Writes vigil-mark.svg, vigil-app-icon.svg, banner.svg and banner-static.svg.
 """
 import pathlib
 
@@ -25,6 +26,23 @@ CUP = "M58 98 H178 V128 A60 52 0 0 1 58 128 Z"
 HANDLE = "M160 128 A30 30 0 1 0 220 128 A30 30 0 1 0 160 128 Z M180 128 A12 12 0 1 0 204 128 A12 12 0 1 0 180 128 Z"
 SAUCER = '<rect x="40" y="190" width="176" height="16" rx="8"'
 STEAM = ["M96 78 C86 66 106 58 96 44", "M140 78 C130 66 150 58 140 44"]
+
+
+def cup(fill):
+  return (
+    f'<path fill="{fill}" d="{CUP}"/><path fill="{fill}" fill-rule="evenodd" d="{HANDLE}"/>{SAUCER} fill="{fill}"/>'
+    + "".join(f'<path fill="none" stroke="{fill}" stroke-width="11" stroke-linecap="round" d="{d}"/>' for d in STEAM)
+  )
+
+
+def icon():
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>Vigil app icon</title>'
+    '<defs><linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#33294D"/>'
+    '<stop offset="1" stop-color="#0F0D1F"/></linearGradient></defs>'
+    '<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>'
+    f'<g transform="translate(512 520) scale(2.3) translate(-128 -125)">{cup(ORANGE)}</g></svg>\n'
+  )
 
 
 def outline(text, weight, size):
@@ -77,5 +95,9 @@ def banner(animated):
 
 
 if __name__ == "__main__":
+  (HERE / "vigil-mark.svg").write_text(
+    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><title>Vigil</title>{cup("#000")}</svg>\n'
+  )
+  (HERE / "vigil-app-icon.svg").write_text(icon())
   (HERE / "banner.svg").write_text(banner(True))
   (HERE / "banner-static.svg").write_text(banner(False))

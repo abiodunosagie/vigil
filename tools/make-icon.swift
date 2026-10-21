@@ -21,6 +21,11 @@ func draw(size: Int) -> Data {
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     svg.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
     NSGraphicsContext.restoreGraphicsState()
+    // The tile's centre is never transparent; if it is, the SVG didn't render.
+    guard let centre = rep.colorAt(x: size / 2, y: size / 2), centre.alphaComponent > 0.9 else {
+        FileHandle.standardError.write("The icon rendered blank at \(size) px\n".data(using: .utf8)!)
+        exit(1)
+    }
     return rep.representation(using: .png, properties: [:])!
 }
 
